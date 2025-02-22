@@ -106,7 +106,15 @@
         <el-card class="strategy-status">
           <template #header>
             <div class="card-header">
-              <span>杨二狗</span>
+              <div class="strategy-title">
+                <span>AI员工 杨二狗</span>
+                <el-tooltip
+                  content="您好，我是AI交易员小深。我擅长通过深度分析市场数据和历史交易信息，为您提供专业的交易建议。作为一名尽职的AI交易员，我会时刻关注市场动态，确保每个交易决策都经过深思熟虑。"
+                  placement="top"
+                >
+                  <el-icon class="info-icon"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <div class="strategy-controls">
                 <el-button
                   :type="getStrategyButtonType"
@@ -131,25 +139,33 @@
           <div class="strategy-info">
             <!-- 思考过程 -->
             <div class="thinking-process">
-              <div class="section-title">思考过程</div>
+              <div class="section-title">
+                思考过程
+                <el-tooltip
+                  content="AI模型分析市场数据并做出交易决策的详细过程"
+                  placement="top"
+                >
+                  <el-icon class="info-icon"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <div class="analysis-section">
                 <div class="reasoning">
-                  <p>{{ analysis.reasoning }}</p>
+                  <p>{{ analysis.reasoning || '等待AI分析...' }}</p>
                 </div>
                 
-                <div class="analysis-content" v-html="formattedAnalysis"></div>
+                <div class="analysis-content" v-html="formattedAnalysis || '正在收集市场数据...'"></div>
                 
                 <div class="recommendation">
                   <div class="rec-header">
                     <span class="label">交易建议:</span>
-                    <span :class="['value', recommendationClass]">{{ analysis.recommendation }}</span>
+                    <span :class="['value', recommendationClass]">{{ analysis.recommendation || 'HOLD' }}</span>
                   </div>
                   <div class="confidence">
                     <span class="label">信心度:</span>
                     <div class="confidence-bar">
                       <div :style="{ width: `${analysis.confidence * 100}%` }" class="confidence-fill"></div>
                     </div>
-                    <span class="confidence-value">{{ (analysis.confidence * 100).toFixed(1) }}%</span>
+                    <span class="confidence-value">{{ ((analysis.confidence || 0) * 100).toFixed(1) }}%</span>
                   </div>
                 </div>
               </div>
@@ -157,7 +173,15 @@
 
             <!-- 盈亏信息 -->
             <div class="pnl-info">
-              <div class="section-title">盈亏信息</div>
+              <div class="section-title">
+                盈亏信息
+                <el-tooltip
+                  content="策略运行产生的盈亏统计信息"
+                  placement="top"
+                >
+                  <el-icon class="info-icon"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <div class="info-item">
                 <span class="label">当前持仓:</span>
                 <span class="value">{{ formatQuantity(strategyState.position) }}</span>
@@ -201,7 +225,15 @@
 
             <!-- 状态信息 -->
             <div class="status-info">
-              <div class="section-title">状态信息</div>
+              <div class="section-title">
+                状态信息
+                <el-tooltip
+                  content="策略运行状态和系统信息"
+                  placement="top"
+                >
+                  <el-icon class="info-icon"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </div>
               <div class="info-item">
                 <span class="label">状态:</span>
                 <el-tag :type="getStatusTagType">
@@ -340,7 +372,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, InfoFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
 import dayjs from 'dayjs'
 import * as echarts from 'echarts'
@@ -360,6 +392,9 @@ let chart = null
 const isLoading = ref(false)
 const isClearing = ref(false)
 const drawerVisible = ref(false)
+
+// 策略类型
+const strategyType = ref('deepseek')  // 默认使用deepseek策略
 
 // AI思考过程相关数据
 const analysis = ref({
@@ -404,7 +439,7 @@ const pnlClass = (pnl) => {
 // WebSocket连接
 const connectWebSocket = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/ws/market/${symbol.value}`
+  const wsUrl = `${protocol}//${window.location.host}/ws/strategy/${symbol.value}`
   
   // 如果已经有连接，先关闭
   if (ws) {
@@ -419,16 +454,88 @@ const connectWebSocket = () => {
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
+      console.log('收到WebSocket消息:', data)
+      
+      // 处理市场数据
       if (data.market?.data?.[0]) {
         marketData.value = data.market.data[0]
       }
+      
+      // 处理策略状态
       if (data.strategy) {
         console.log('收到策略状态更新:', data.strategy)
+        const oldStatus = strategyState.value?.status
+        
+        // 更新状态前先检查是否真的有变化
+        const hasStatusChanged = oldStatus !== data.strategy.status
+        const hasPositionChanged = strategyState.value?.position !== data.strategy.position
+        const hasPnLChanged = strategyState.value?.total_pnl !== data.strategy.total_pnl
+        
+        // 更新状态
         strategyState.value = data.strategy
+        
+        // 如果状态发生实质性变化，显示通知
+        if (hasStatusChanged || hasPositionChanged || hasPnLChanged) {
+          const statusMap = {
+            running: '运行中',
+            stopped: '已停止',
+            paused: '已暂停',
+            error: '发生错误'
+          }
+          
+          if (hasStatusChanged) {
+            ElMessage.info(`策略状态变更为: ${statusMap[data.strategy.status] || data.strategy.status}`)
+          }
+        }
       }
+      
+      // 处理AI分析结果
       if (data.analysis) {
         console.log('收到AI分析更新:', data.analysis)
-        analysis.value = data.analysis
+        try {
+          // 尝试从response_text中提取JSON
+          let analysisText = data.analysis.analysis_content || '';
+          if (analysisText.includes('{')) {
+            try {
+              const jsonStart = analysisText.indexOf('{');
+              const jsonEnd = analysisText.lastIndexOf('}') + 1;
+              const jsonStr = analysisText.substring(jsonStart, jsonEnd);
+              const jsonData = JSON.parse(jsonStr);
+              
+              // 更新分析结果
+              analysis.value = {
+                analysis: jsonData.analysis || '等待AI分析...',
+                recommendation: jsonData.recommendation || 'HOLD',
+                confidence: jsonData.confidence || 0,
+                reasoning: jsonData.reasoning || '正在收集市场数据...'
+              }
+            } catch (e) {
+              // 如果JSON解析失败，直接使用原始文本
+              analysis.value = {
+                analysis: analysisText,
+                recommendation: data.analysis.recommendation || 'HOLD',
+                confidence: data.analysis.confidence || 0,
+                reasoning: data.analysis.reasoning || '正在收集市场数据...'
+              }
+            }
+          } else {
+            // 如果没有找到JSON，直接使用原始文本
+            analysis.value = {
+              analysis: analysisText,
+              recommendation: data.analysis.recommendation || 'HOLD',
+              confidence: data.analysis.confidence || 0,
+              reasoning: data.analysis.reasoning || '正在收集市场数据...'
+            }
+          }
+        } catch (error) {
+          console.error('处理分析结果失败:', error)
+          analysis.value = {
+            analysis: '处理分析结果时出错',
+            recommendation: 'HOLD',
+            confidence: 0,
+            reasoning: '正在收集市场数据...'
+          }
+        }
       }
     } catch (error) {
       console.error('处理WebSocket消息失败:', error)
@@ -446,13 +553,16 @@ const connectWebSocket = () => {
     ws = null
     // 如果不是主动关闭的连接，则尝试重连
     if (event.code !== 1000) {
-      console.log('1秒后尝试重新连接...')
-      setTimeout(connectWebSocket, 1000)
+      console.log('3秒后尝试重新连接...')
+      setTimeout(connectWebSocket, 3000)
     }
   }
 
   ws.onerror = (error) => {
     console.error('WebSocket错误:', error)
+    ElMessage.error('WebSocket连接错误，正在尝试重新连接...')
+    // 发生错误时重新获取状态
+    fetchStrategyState()
   }
 }
 
@@ -478,62 +588,46 @@ const fetchAccountBalance = async () => {
 
 // 策略状态相关
 const getStrategyButtonType = computed(() => {
-  switch (strategyState.value?.status) {
-    case 'running':
-      return 'danger'
-    case 'error':
-      return 'warning'
-    default:
-      return 'success'
+  const statusMap = {
+    'running': 'danger',
+    'error': 'warning',
+    'paused': 'warning',
+    'stopped': 'success'
   }
+  return statusMap[strategyState.value?.status] || 'success'
 })
 
 const getStrategyButtonText = computed(() => {
-  switch (strategyState.value?.status) {
-    case 'running':
-      return '停止策略'
-    case 'paused':
-      return '继续运行'
-    case 'error':
-      return '重新启动'
-    default:
-      return '启动策略'
+  const statusMap = {
+    'running': '停止策略',
+    'paused': '继续运行',
+    'error': '重新启动',
+    'stopped': '启动策略'
   }
+  return statusMap[strategyState.value?.status] || '启动策略'
 })
 
 const getStatusTagType = computed(() => {
-  switch (strategyState.value?.status) {
-    case 'running':
-      return 'success'
-    case 'stopped':
-      return 'info'
-    case 'paused':
-      return 'warning'
-    case 'error':
-      return 'danger'
-    default:
-      return 'info'
+  const statusMap = {
+    'running': 'success',
+    'stopped': 'info',
+    'paused': 'warning',
+    'error': 'danger'
   }
+  return statusMap[strategyState.value?.status] || 'info'
 })
 
 const getStatusText = computed(() => {
-  switch (strategyState.value?.status) {
-    case 'running':
-      return '运行中'
-    case 'stopped':
-      return '已停止'
-    case 'paused':
-      return '已暂停'
-    case 'error':
-      return '错误'
-    default:
-      return '未知'
+  const statusMap = {
+    'running': '运行中',
+    'stopped': '已停止',
+    'paused': '已暂停',
+    'error': '错误'
   }
+  return statusMap[strategyState.value?.status] || '未知'
 })
 
-const canPause = computed(() => {
-  return strategyState.value?.status === 'running'
-})
+const canPause = computed(() => strategyState.value?.status === 'running')
 
 const formatLastRunTime = computed(() => {
   return strategyState.value?.last_run_time
@@ -545,19 +639,28 @@ const formatLastRunTime = computed(() => {
 const handleStrategyAction = async () => {
   try {
     isLoading.value = true
-    const action = strategyState.value?.status === 'running' ? 'stop' : 'start'
-    console.log(`执行策略${action}操作`)
-    const response = await axios.post(`${API_BASE_URL}/api/strategy/${action}`)
-    console.log('策略操作响应:', response.data)
-    ElMessage.success(`策略${action === 'start' ? '启动' : '停止'}成功`)
+    const currentStatus = strategyState.value?.status || 'stopped'
+    console.log('当前策略状态:', currentStatus)
     
-    // 立即获取最新状态
+    // 根据当前状态决定操作
+    const action = currentStatus === 'running' ? 'stop' : 'start'
+    
+    console.log(`执行策略${action}操作`)
+    await axios.post(`${API_BASE_URL}/api/strategy/${action}`, {
+      strategy_type: strategyType.value,
+      symbol: symbol.value
+    })
+    
+    // 获取最新状态
     await fetchStrategyState()
-    // 重新建立WebSocket连接以确保获取最新数据
-    connectWebSocket()
+    
   } catch (error) {
     console.error('策略操作失败:', error)
-    ElMessage.error(error.response?.data?.detail || `策略操作失败`)
+    const errorMessage = error.response?.data?.detail || `策略操作失败`
+    ElMessage.error(errorMessage)
+    
+    // 如果发生错误，重新获取状态以确保显示正确的状态
+    await fetchStrategyState()
   } finally {
     isLoading.value = false
   }
@@ -567,15 +670,18 @@ const handlePause = async () => {
   try {
     isLoading.value = true
     console.log('执行策略暂停操作')
-    const response = await axios.post(`${API_BASE_URL}/api/strategy/pause`)
-    console.log('策略暂停响应:', response.data)
-    ElMessage.success('策略已暂停')
+    await axios.post(`${API_BASE_URL}/api/strategy/pause`, {
+      strategy_type: strategyType.value,
+      symbol: symbol.value
+    })
     
-    // 立即获取最新状态
+    // 获取最新状态
     await fetchStrategyState()
+    
   } catch (error) {
     console.error('策略暂停失败:', error)
     ElMessage.error(error.response?.data?.detail || '策略暂停失败')
+    await fetchStrategyState()
   } finally {
     isLoading.value = false
   }
@@ -584,14 +690,65 @@ const handlePause = async () => {
 // 获取策略状态
 const fetchStrategyState = async () => {
   try {
-    const response = await axios.get(`${API_BASE_URL}/api/strategy/state?symbol=${symbol.value}`)
+    console.log('获取策略状态, 参数:', {
+      symbol: symbol.value,
+      strategy_type: strategyType.value
+    })
+    
+    const response = await axios.get(
+      `${API_BASE_URL}/api/strategy/state?symbol=${symbol.value}&strategy_type=${strategyType.value}`
+    )
+    
+    console.log('获取策略状态响应:', response.data)
+    
     if (response.data && response.data.length > 0) {
-      console.log('获取到策略状态:', response.data[0])
-      strategyState.value = response.data[0]
+      const newState = response.data[0]
+      
+      // 验证状态的有效性
+      if (!['running', 'stopped', 'paused', 'error'].includes(newState.status)) {
+        console.error('无效的策略状态:', newState.status)
+        ElMessage.error('收到无效的策略状态')
+        return
+      }
+      
+      // 检查状态变化
+      const oldStatus = strategyState.value?.status
+      if (oldStatus && oldStatus !== newState.status) {
+        console.log('策略状态发生变化:', {
+          from: oldStatus,
+          to: newState.status
+        })
+      }
+      
+      strategyState.value = newState
+      console.log('更新策略状态:', strategyState.value)
+    } else {
+      console.warn('没有找到策略状态，使用默认值')
+      strategyState.value = {
+        status: 'stopped',
+        position: 0,
+        avg_entry_price: 0,
+        unrealized_pnl: 0,
+        total_pnl: 0,
+        total_commission: 0
+      }
     }
   } catch (error) {
     console.error('获取策略状态失败:', error)
     ElMessage.error('获取策略状态失败')
+    
+    // 如果获取状态失败，不要清空现有状态
+    if (!strategyState.value) {
+      strategyState.value = {
+        status: 'error',
+        position: 0,
+        avg_entry_price: 0,
+        unrealized_pnl: 0,
+        total_pnl: 0,
+        total_commission: 0,
+        last_error: '无法获取策略状态'
+      }
+    }
   }
 }
 
@@ -1292,5 +1449,25 @@ let refreshInterval = setInterval(() => {
   text-align: center;
   padding: 20px;
   font-style: italic;
+}
+
+.strategy-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.info-icon {
+  font-size: 16px;
+  color: #909399;
+  cursor: help;
+}
+
+.strategy-status {
+  height: 100%;
+  .el-card__body {
+    height: calc(100% - 60px);
+    overflow-y: auto;
+  }
 }
 </style> 
