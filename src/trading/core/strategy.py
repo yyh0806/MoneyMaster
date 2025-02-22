@@ -216,25 +216,41 @@ class BaseStrategy(ABC):
     
     def calculate_unrealized_pnl(self) -> Decimal:
         """计算未实现盈亏"""
-        if self.position == 0:
+        try:
+            if self.position == 0:
+                return Decimal('0')
+            
+            market_data = self.client.get_market_price(self.symbol)
+            if not market_data or 'data' not in market_data or not market_data['data']:
+                logger.error(f"获取市场价格失败: {market_data}")
+                return Decimal('0')
+                
+            market_data_item = market_data['data'][0]
+            if not isinstance(market_data_item, dict) or 'last' not in market_data_item:
+                logger.error(f"无效的市场数据项: {market_data_item}")
+                return Decimal('0')
+                
+            current_price = Decimal(str(market_data_item['last']))
+            return (current_price - self.avg_entry_price) * self.position
+        except Exception as e:
+            logger.error(f"计算未实现盈亏失败: {str(e)}")
             return Decimal('0')
-        
-        current_price = Decimal(str(self.client.get_market_price(self.symbol)['last']))
-        return (current_price - self.avg_entry_price) * self.position
     
     def buy(self, quantity: Decimal, price: Optional[Decimal] = None):
         """执行买入操作"""
         if price is None:
             price = Decimal(str(self.client.get_market_price(self.symbol)['last']))
         
-        commission = price * quantity * self.commission_rate
+        # 手续费计算：确保为正值
+        commission = abs(price * quantity * self.commission_rate)
         self.total_commission += commission
         
+        realized_pnl = Decimal('0')
         if self.position < 0:  # 如果是空头平仓
-            realized_pnl = (self.avg_entry_price - price) * min(abs(self.position), quantity)
+            # 计算实现盈亏：(开仓价格 - 平仓价格) × 平仓数量
+            closing_quantity = min(abs(self.position), quantity)
+            realized_pnl = (self.avg_entry_price - price) * closing_quantity
             self.total_pnl += realized_pnl
-        else:
-            realized_pnl = Decimal('0')
         
         # 更新持仓均价
         if self.position + quantity != 0:
@@ -252,14 +268,16 @@ class BaseStrategy(ABC):
         if price is None:
             price = Decimal(str(self.client.get_market_price(self.symbol)['last']))
         
-        commission = price * quantity * self.commission_rate
+        # 手续费计算：确保为正值
+        commission = abs(price * quantity * self.commission_rate)
         self.total_commission += commission
         
+        realized_pnl = Decimal('0')
         if self.position > 0:  # 如果是多头平仓
-            realized_pnl = (price - self.avg_entry_price) * min(self.position, quantity)
+            # 计算实现盈亏：(平仓价格 - 开仓价格) × 平仓数量
+            closing_quantity = min(self.position, quantity)
+            realized_pnl = (price - self.avg_entry_price) * closing_quantity
             self.total_pnl += realized_pnl
-        else:
-            realized_pnl = Decimal('0')
         
         # 更新持仓均价
         if self.position - quantity != 0:

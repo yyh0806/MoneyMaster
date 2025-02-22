@@ -82,19 +82,34 @@
             </div>
             <div class="info-item">
               <span class="label">未实现盈亏:</span>
-              <span class="value" :class="pnlClass(strategyState.unrealized_pnl)">
-                {{ formatPnL(strategyState.unrealized_pnl) }}
-              </span>
+              <el-tooltip
+                content="未实现盈亏 = (当前市价 - 持仓均价) × 持仓数量。这是当前持仓的预计盈亏，尚未通过交易实现。"
+                placement="top"
+              >
+                <span class="value" :class="pnlClass(strategyState.unrealized_pnl)">
+                  {{ formatPnL(strategyState.unrealized_pnl) }}
+                </span>
+              </el-tooltip>
             </div>
             <div class="info-item">
               <span class="label">总盈亏:</span>
-              <span class="value" :class="pnlClass(strategyState.total_pnl)">
-                {{ formatPnL(strategyState.total_pnl) }}
-              </span>
+              <el-tooltip
+                content="总盈亏 = 已实现盈亏 + 未实现盈亏。绿色表示盈利，红色表示亏损。"
+                placement="top"
+              >
+                <span class="value" :class="pnlClass(strategyState.total_pnl)">
+                  {{ formatPnL(strategyState.total_pnl) }}
+                </span>
+              </el-tooltip>
             </div>
             <div class="info-item">
               <span class="label">总手续费:</span>
-              <span class="value">{{ formatPrice(strategyState.total_commission) }}</span>
+              <el-tooltip
+                content="所有交易产生的手续费总和"
+                placement="top"
+              >
+                <span class="value">{{ formatPrice(strategyState.total_commission) }}</span>
+              </el-tooltip>
             </div>
           </div>
         </el-card>
@@ -143,51 +158,61 @@
       <template #header>
         <div class="card-header">
           <span>交易记录</span>
+          <el-button
+            type="danger"
+            size="small"
+            @click="handleClearHistory"
+            :loading="isClearing"
+          >
+            清空历史
+          </el-button>
         </div>
       </template>
-      <el-table :data="tradeHistory" style="width: 100%" height="400">
-        <el-table-column prop="trade_time" label="时间" width="180">
-          <template #default="scope">
-            {{ formatDateTime(scope.row.trade_time) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="side" label="方向" width="100">
-          <template #default="scope">
-            <el-tag :type="scope.row.side === 'BUY' ? 'success' : 'danger'">
-              {{ scope.row.side === 'BUY' ? '买入' : '卖出' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="price" label="价格" width="150">
-          <template #default="scope">
-            {{ formatPrice(scope.row.price) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="quantity" label="数量" width="150">
-          <template #default="scope">
-            {{ formatQuantity(scope.row.quantity) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="realized_pnl" label="实现盈亏" width="150">
-          <template #default="scope">
-            <span :class="pnlClass(scope.row.realized_pnl)">
-              {{ formatPnL(scope.row.realized_pnl) }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="commission" label="手续费" width="150">
-          <template #default="scope">
-            {{ formatPrice(scope.row.commission) }}
-          </template>
-        </el-table-column>
-      </el-table>
+      <div class="table-container">
+        <el-table :data="tradeHistory" style="width: 100%" height="400">
+          <el-table-column prop="trade_time" label="时间" min-width="200" align="center">
+            <template #default="scope">
+              {{ formatDateTime(scope.row.trade_time) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="side" label="方向" width="100" align="center">
+            <template #default="scope">
+              <el-tag :type="scope.row.side === 'BUY' ? 'success' : 'danger'">
+                {{ scope.row.side === 'BUY' ? '买入' : '卖出' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="price" label="价格" width="140" align="right">
+            <template #default="scope">
+              {{ formatPrice(scope.row.price) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="quantity" label="数量" width="140" align="right">
+            <template #default="scope">
+              {{ formatQuantity(scope.row.quantity) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="commission" label="手续费" width="120" align="right">
+            <template #default="scope">
+              {{ formatPrice(scope.row.commission) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="realized_pnl" label="实现盈亏" width="140" align="right">
+            <template #default="scope">
+              <span :class="pnlClass(scope.row.realized_pnl)">
+                {{ scope.row.realized_pnl === 0 ? '-' : formatPnL(scope.row.realized_pnl) }}
+              </span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
     </el-card>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from 'axios'
 import dayjs from 'dayjs'
 import * as echarts from 'echarts'
@@ -205,6 +230,7 @@ const chartContainer = ref(null)
 let ws = null
 let chart = null
 const isLoading = ref(false)
+const isClearing = ref(false)
 
 // 格式化函数
 const formatPrice = (price) => price ? `$${Number(price).toFixed(2)}` : '-'
@@ -637,6 +663,34 @@ const handleResize = () => {
   }
 }
 
+const handleClearHistory = async () => {
+  try {
+    // 显示确认对话框
+    await ElMessageBox.confirm('确定要清空所有历史记录吗？此操作不可恢复！', '警告', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    isClearing.value = true
+    const response = await axios.post(`${API_BASE_URL}/api/clear_history`)
+    if (response.data.status === 'success') {
+      ElMessage.success('历史记录已清空')
+      // 刷新数据
+      await fetchStrategyState()
+      await fetchTradeHistory()
+      await fetchAccountBalance()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('清空历史记录失败:', error)
+      ElMessage.error(error.response?.data?.detail || '清空历史记录失败')
+    }
+  } finally {
+    isClearing.value = false
+  }
+}
+
 onMounted(async () => {
   await fetchStrategyState()  // 首次加载时获取策略状态
   connectWebSocket()
@@ -732,5 +786,14 @@ let refreshInterval = setInterval(() => {
 .chart-controls {
   display: flex;
   gap: 10px;
+}
+
+.table-container {
+  margin: 0 auto;
+  max-width: 900px;
+}
+
+.trade-history .el-card__body {
+  padding: 10px 20px;
 }
 </style> 

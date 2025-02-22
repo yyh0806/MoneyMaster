@@ -10,6 +10,7 @@ from loguru import logger
 from src.trading.client import OKXClient
 from src.trading.strategies.simple_test import SimpleTestStrategy
 from src.trading.core.models import init_db, TradeRecord, StrategyState, StrategyStatus
+from src.trading.core.strategy import StoppedState
 from src.config import settings
 
 app = FastAPI(title="MoneyMaster API")
@@ -145,7 +146,7 @@ async def start_strategy():
                     market_data = okx_client.get_market_price(strategy.symbol)
                     logger.info(f"策略执行中，市场数据: {market_data}")
                     strategy.on_tick(market_data)
-                    await asyncio.sleep(60)  # 每分钟执行一次
+                    await asyncio.sleep(1)  # 每秒检查一次
                 except Exception as e:
                     error_msg = f"Strategy error: {str(e)}"
                     logger.error(error_msg)
@@ -192,6 +193,39 @@ async def pause_strategy():
     except Exception as e:
         logger.error(f"暂停策略失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/clear_history")
+async def clear_history():
+    """清空所有历史记录"""
+    try:
+        # 清空交易记录
+        db_session.query(TradeRecord).delete()
+        
+        # 重置策略状态的计数器，但保持运行状态不变
+        states = db_session.query(StrategyState).all()
+        for state in states:
+            state.position = Decimal('0')
+            state.avg_entry_price = Decimal('0')
+            state.unrealized_pnl = Decimal('0')
+            state.total_pnl = Decimal('0')
+            state.total_commission = Decimal('0')
+            state.last_error = None
+            # 不修改 status，保持原有状态
+        
+        # 提交更改
+        db_session.commit()
+        
+        # 重置策略实例的计数器，但不改变状态
+        strategy.position = Decimal('0')
+        strategy.avg_entry_price = Decimal('0')
+        strategy.total_pnl = Decimal('0')
+        strategy.total_commission = Decimal('0')
+        
+        return {"status": "success", "message": "历史记录已清空"}
+    except Exception as e:
+        logger.error(f"清空历史记录失败: {e}")
+        db_session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # WebSocket连接管理
 class ConnectionManager:
