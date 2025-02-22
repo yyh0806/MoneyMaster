@@ -32,11 +32,18 @@
 
     <el-row :gutter="20">
       <!-- 市场数据卡片 -->
-      <el-col :span="12">
+      <el-col :span="3">
         <el-card class="market-data">
           <template #header>
             <div class="card-header">
-              <span>市场数据 ({{ symbol }})</span>
+              <span>市场数据</span>
+              <el-select v-model="symbol" size="small" @change="handleSymbolChange" style="margin-left: 10px; width: 120px;">
+                <el-option label="BTC-USDT" value="BTC-USDT" />
+                <el-option label="ETH-USDT" value="ETH-USDT" />
+                <el-option label="BNB-USDT" value="BNB-USDT" />
+                <el-option label="XRP-USDT" value="XRP-USDT" />
+                <el-option label="ADA-USDT" value="ADA-USDT" />
+              </el-select>
             </div>
           </template>
           <div class="price-info">
@@ -61,7 +68,7 @@
       </el-col>
 
       <!-- 策略状态卡片 -->
-      <el-col :span="12">
+      <el-col :span="6">
         <el-card class="strategy-status">
           <template #header>
             <div class="card-header">
@@ -144,27 +151,45 @@
           </div>
         </el-card>
       </el-col>
+
+      <!-- 剩余空间 -->
+      <el-col :span="15">
+        <!-- 这里可以放置其他内容 -->
+      </el-col>
     </el-row>
 
     <!-- 市场走势图卡片 -->
-    <el-card class="market-chart">
-      <template #header>
-        <div class="card-header">
-          <span>市场走势图</span>
-          <div class="chart-controls">
-            <el-select v-model="selectedPeriod" size="small" @change="fetchKlineData">
-              <el-option label="1分钟" value="1m" />
-              <el-option label="5分钟" value="5m" />
-              <el-option label="15分钟" value="15m" />
-              <el-option label="1小时" value="1H" />
-              <el-option label="4小时" value="4H" />
-              <el-option label="1天" value="1D" />
-            </el-select>
-          </div>
-        </div>
-      </template>
-      <div ref="chartContainer" style="height: 400px;"></div>
-    </el-card>
+    <el-row>
+      <el-col :span="12">
+        <el-card class="market-chart">
+          <template #header>
+            <div class="card-header">
+              <div class="left-controls">
+                <span>市场走势图</span>
+                <el-select v-model="symbol" size="small" @change="handleSymbolChange" style="margin-left: 10px; width: 120px;">
+                  <el-option label="BTC-USDT" value="BTC-USDT" />
+                  <el-option label="ETH-USDT" value="ETH-USDT" />
+                  <el-option label="BNB-USDT" value="BNB-USDT" />
+                  <el-option label="XRP-USDT" value="XRP-USDT" />
+                  <el-option label="ADA-USDT" value="ADA-USDT" />
+                </el-select>
+              </div>
+              <div class="chart-controls">
+                <el-select v-model="selectedPeriod" size="small" @change="fetchKlineData">
+                  <el-option label="1分钟" value="1m" />
+                  <el-option label="5分钟" value="5m" />
+                  <el-option label="15分钟" value="15m" />
+                  <el-option label="1小时" value="1H" />
+                  <el-option label="4小时" value="4H" />
+                  <el-option label="1天" value="1D" />
+                </el-select>
+              </div>
+            </div>
+          </template>
+          <div ref="chartContainer" style="height: 400px;"></div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <!-- 交易记录表格 -->
     <el-card class="trade-history">
@@ -783,6 +808,29 @@ const handleClearHistory = async () => {
   }
 }
 
+// 处理交易对变更
+const handleSymbolChange = async () => {
+  // 断开旧的WebSocket连接
+  if (ws) {
+    ws.close()
+  }
+  
+  // 重新获取市场数据
+  await fetchStrategyState()
+  
+  // 重新连接WebSocket
+  connectWebSocket()
+  
+  // 重新获取K线数据
+  fetchKlineData()
+  
+  // 重新获取交易历史
+  fetchTradeHistory()
+  
+  // 重新获取账户余额
+  fetchAccountBalance()
+}
+
 onMounted(async () => {
   await fetchStrategyState()  // 首次加载时获取策略状态
   connectWebSocket()
@@ -887,6 +935,17 @@ let refreshInterval = setInterval(() => {
   align-items: center;
 }
 
+.left-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chart-controls {
+  display: flex;
+  gap: 10px;
+}
+
 .price-info,
 .strategy-info,
 .balance-info {
@@ -932,11 +991,6 @@ let refreshInterval = setInterval(() => {
   margin-bottom: 20px;
 }
 
-.chart-controls {
-  display: flex;
-  gap: 10px;
-}
-
 .table-container {
   margin: 0 auto;
   max-width: 900px;
@@ -948,5 +1002,28 @@ let refreshInterval = setInterval(() => {
 
 .account-drawer {
   /* Add your styles here */
+}
+
+.price-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.price-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.label {
+  color: #606266;
+  margin-right: 8px;
+}
+
+.value {
+  font-weight: bold;
+  font-size: 14px;
 }
 </style> 
