@@ -38,16 +38,40 @@
               <span>策略状态</span>
               <div class="strategy-controls">
                 <el-button
-                  :type="isStrategyRunning ? 'danger' : 'success'"
+                  :type="getStrategyButtonType"
                   size="small"
-                  @click="toggleStrategy"
+                  @click="handleStrategyAction"
+                  :loading="isLoading"
                 >
-                  {{ isStrategyRunning ? '停止策略' : '启动策略' }}
+                  {{ getStrategyButtonText }}
+                </el-button>
+                <el-button
+                  v-if="canPause"
+                  type="warning"
+                  size="small"
+                  @click="handlePause"
+                  :loading="isLoading"
+                >
+                  暂停
                 </el-button>
               </div>
             </div>
           </template>
           <div class="strategy-info">
+            <div class="info-item">
+              <span class="label">状态:</span>
+              <el-tag :type="getStatusTagType">
+                {{ getStatusText }}
+              </el-tag>
+            </div>
+            <div class="info-item" v-if="strategyState.last_error">
+              <span class="label">错误信息:</span>
+              <span class="value text-danger">{{ strategyState.last_error }}</span>
+            </div>
+            <div class="info-item">
+              <span class="label">最后运行时间:</span>
+              <span class="value">{{ formatLastRunTime }}</span>
+            </div>
             <div class="info-item">
               <span class="label">当前持仓:</span>
               <span class="value">{{ formatQuantity(strategyState.position) }}</span>
@@ -180,6 +204,7 @@ const selectedPeriod = ref('15m')
 const chartContainer = ref(null)
 let ws = null
 let chart = null
+const isLoading = ref(false)
 
 // 格式化函数
 const formatPrice = (price) => price ? `$${Number(price).toFixed(2)}` : '-'
@@ -204,19 +229,50 @@ const pnlClass = (pnl) => {
 const connectWebSocket = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const wsUrl = `${protocol}//${window.location.host}/ws/market/${symbol.value}`
+  
+  // 如果已经有连接，先关闭
+  if (ws) {
+    console.log('关闭现有WebSocket连接')
+    ws.close()
+    ws = null
+  }
+  
+  console.log('建立新的WebSocket连接:', wsUrl)
   ws = new WebSocket(wsUrl)
   
   ws.onmessage = (event) => {
-    const data = JSON.parse(event.data)
-    marketData.value = data.market?.data?.[0] || {}
-    if (data.strategy) {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.market?.data?.[0]) {
+        marketData.value = data.market.data[0]
+      }
+      if (data.strategy) {
+        console.log('收到策略状态更新:', data.strategy)
         strategyState.value = data.strategy
-        isStrategyRunning.value = data.strategy.is_running
+      }
+    } catch (error) {
+      console.error('处理WebSocket消息失败:', error)
     }
   }
 
-  ws.onclose = () => {
-    setTimeout(connectWebSocket, 1000)
+  ws.onopen = () => {
+    console.log('WebSocket连接已建立')
+    // 连接成功后立即获取最新状态
+    fetchStrategyState()
+  }
+
+  ws.onclose = (event) => {
+    console.log('WebSocket连接已关闭，code:', event.code, '原因:', event.reason)
+    ws = null
+    // 如果不是主动关闭的连接，则尝试重连
+    if (event.code !== 1000) {
+      console.log('1秒后尝试重新连接...')
+      setTimeout(connectWebSocket, 1000)
+    }
+  }
+
+  ws.onerror = (error) => {
+    console.error('WebSocket错误:', error)
   }
 }
 
@@ -240,28 +296,160 @@ const fetchAccountBalance = async () => {
   }
 }
 
-// 切换策略状态
-const toggleStrategy = async () => {
+// 策略状态相关
+const getStrategyButtonType = computed(() => {
+  switch (strategyState.value?.status) {
+    case 'running':
+      return 'danger'
+    case 'error':
+      return 'warning'
+    default:
+      return 'success'
+  }
+})
+
+const getStrategyButtonText = computed(() => {
+  switch (strategyState.value?.status) {
+    case 'running':
+      return '停止策略'
+    case 'paused':
+      return '继续运行'
+    case 'error':
+      return '重新启动'
+    default:
+      return '启动策略'
+  }
+})
+
+const getStatusTagType = computed(() => {
+  switch (strategyState.value?.status) {
+    case 'running':
+      return 'success'
+    case 'stopped':
+      return 'info'
+    case 'paused':
+      return 'warning'
+    case 'error':
+      return 'danger'
+    default:
+      return 'info'
+  }
+})
+
+const getStatusText = computed(() => {
+  switch (strategyState.value?.status) {
+    case 'running':
+      return '运行中'
+    case 'stopped':
+      return '已停止'
+    case 'paused':
+      return '已暂停'
+    case 'error':
+      return '错误'
+    default:
+      return '未知'
+  }
+})
+
+const canPause = computed(() => {
+  return strategyState.value?.status === 'running'
+})
+
+const formatLastRunTime = computed(() => {
+  return strategyState.value?.last_run_time
+    ? dayjs(strategyState.value.last_run_time).format('YYYY-MM-DD HH:mm:ss')
+    : '-'
+})
+
+// 处理策略操作
+const handleStrategyAction = async () => {
   try {
-    const url = `${API_BASE_URL}/api/strategy/${isStrategyRunning.value ? 'stop' : 'start'}`
-    await axios.post(url)
-    isStrategyRunning.value = !isStrategyRunning.value
-    ElMessage.success(`策略${isStrategyRunning.value ? '启动' : '停止'}成功`)
+    isLoading.value = true
+    const action = strategyState.value?.status === 'running' ? 'stop' : 'start'
+    console.log(`执行策略${action}操作`)
+    const response = await axios.post(`${API_BASE_URL}/api/strategy/${action}`)
+    console.log('策略操作响应:', response.data)
+    ElMessage.success(`策略${action === 'start' ? '启动' : '停止'}成功`)
+    
+    // 立即获取最新状态
+    await fetchStrategyState()
+    // 重新建立WebSocket连接以确保获取最新数据
+    connectWebSocket()
   } catch (error) {
-    ElMessage.error(`策略${isStrategyRunning.value ? '启动' : '停止'}失败`)
+    console.error('策略操作失败:', error)
+    ElMessage.error(error.response?.data?.detail || `策略操作失败`)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const handlePause = async () => {
+  try {
+    isLoading.value = true
+    console.log('执行策略暂停操作')
+    const response = await axios.post(`${API_BASE_URL}/api/strategy/pause`)
+    console.log('策略暂停响应:', response.data)
+    ElMessage.success('策略已暂停')
+    
+    // 立即获取最新状态
+    await fetchStrategyState()
+  } catch (error) {
+    console.error('策略暂停失败:', error)
+    ElMessage.error(error.response?.data?.detail || '策略暂停失败')
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 获取策略状态
+const fetchStrategyState = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/api/strategy/state?symbol=${symbol.value}`)
+    if (response.data && response.data.length > 0) {
+      console.log('获取到策略状态:', response.data[0])
+      strategyState.value = response.data[0]
+    }
+  } catch (error) {
+    console.error('获取策略状态失败:', error)
+    ElMessage.error('获取策略状态失败')
   }
 }
 
 // 格式化K线数据
 const formatKlineData = (data) => {
-  return data.map(item => ({
-    time: dayjs(parseInt(item[0])).format('YYYY-MM-DD HH:mm'),
-    open: parseFloat(item[1]),
-    high: parseFloat(item[2]),
-    low: parseFloat(item[3]),
-    close: parseFloat(item[4]),
-    volume: parseFloat(item[5])
-  }))
+  return data.map(item => {
+    // OKX的K线数据格式：[timestamp, open, high, low, close, volume, ...]
+    console.log('原始数据项:', item)
+    const [timestamp, open, high, low, close, volume] = item
+    console.log('解析后的原始数据:', {
+      timestamp: dayjs(parseInt(timestamp)).format('YYYY-MM-DD HH:mm:ss'),
+      open: Number(open),
+      high: Number(high),
+      low: Number(low),
+      close: Number(close),
+      volume: Number(volume)
+    })
+    
+    // 确保所有价格数据都是数值类型
+    const formattedData = {
+      time: dayjs(parseInt(timestamp)).format('YYYY-MM-DD HH:mm'),
+      open: Number(open),
+      high: Number(high),
+      low: Number(low),
+      close: Number(close),
+      volume: Number(volume)
+    }
+    
+    // 验证价格的合理性
+    if (formattedData.high < formattedData.close || formattedData.high < formattedData.open) {
+      console.error('数据异常: 最高价低于开盘价或收盘价', formattedData)
+    }
+    if (formattedData.low > formattedData.close || formattedData.low > formattedData.open) {
+      console.error('数据异常: 最低价高于开盘价或收盘价', formattedData)
+    }
+    
+    return formattedData
+  })
 }
 
 // 初始化图表
@@ -278,6 +466,21 @@ const updateChart = (klineData) => {
     initChart()
   }
 
+  // 记录传递给ECharts的数据
+  const candlestickData = klineData.map(item => {
+    const data = [
+      item.open,    // 开盘价
+      item.close,   // 收盘价
+      item.low,     // 最低价
+      item.high     // 最高价
+    ]
+    console.log('K线数据转换:', {
+      from: item,
+      to: data
+    })
+    return data
+  })
+
   const option = {
     animation: false,
     tooltip: {
@@ -286,16 +489,34 @@ const updateChart = (klineData) => {
         type: 'cross'
       },
       formatter: (params) => {
-        const candleData = params.find(p => p.seriesName === '价格')?.data || []
-        const volumeData = params.find(p => p.seriesName === '成交量')?.data || 0
-        return `
-          时间: ${params[0].axisValue}<br/>
-          开盘: $${Number(candleData[0]).toFixed(2)}<br/>
-          最高: $${Number(candleData[3]).toFixed(2)}<br/>
-          最低: $${Number(candleData[2]).toFixed(2)}<br/>
-          收盘: $${Number(candleData[1]).toFixed(2)}<br/>
-          成交量: ${Number(volumeData).toFixed(4)}
-        `
+        const candleData = params.find(p => p.seriesName === '价格')
+        const volumeData = params.find(p => p.seriesName === '成交量')
+        
+        if (volumeData && volumeData.componentIndex === 1) {
+          return `
+            时间: ${params[0].axisValue}<br/>
+            成交量: ${Number(volumeData.value).toFixed(4)}
+          `
+        } else if (candleData) {
+          console.log('Tooltip原始数据:', candleData.data)
+          // OKX的K线数据格式：[timestamp, open, high, low, close, volume]
+          const [timestamp, open, high, low, close] = candleData.data
+          console.log('Tooltip解析后的数据:', {
+            time: params[0].axisValue,
+            open,
+            high,
+            low,
+            close
+          })
+          return `
+            时间: ${params[0].axisValue}<br/>
+            开盘: $${Number(open).toFixed(2)}<br/>
+            收盘: $${Number(close).toFixed(2)}<br/>
+            最高: $${Number(high).toFixed(2)}<br/>
+            最低: $${Number(low).toFixed(2)}
+          `
+        }
+        return ''
       }
     },
     legend: {
@@ -368,12 +589,7 @@ const updateChart = (klineData) => {
     series: [{
       name: '价格',
       type: 'candlestick',
-      data: klineData.map(item => [
-        item.open,
-        item.close,
-        item.low,
-        item.high
-      ]),
+      data: candlestickData,
       itemStyle: {
         color: '#67C23A',
         color0: '#F56C6C',
@@ -421,7 +637,8 @@ const handleResize = () => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await fetchStrategyState()  // 首次加载时获取策略状态
   connectWebSocket()
   fetchTradeHistory()
   fetchAccountBalance()
@@ -431,11 +648,16 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (ws) {
-    ws.close()
+    console.log('组件卸载，关闭WebSocket连接')
+    ws.close(1000, 'Component unmounted')
+    ws = null
   }
   window.removeEventListener('resize', handleResize)
   if (chart) {
     chart.dispose()
+  }
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
   }
 })
 

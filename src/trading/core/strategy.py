@@ -4,15 +4,107 @@ from decimal import Decimal
 from typing import Dict, Optional
 from loguru import logger
 
-from .models import TradeRecord, StrategyState, BalanceSnapshot
+from .models import TradeRecord, StrategyState, StrategyStatus
 from ..client import OKXClient
+
+class StrategyStateBase(ABC):
+    """策略状态基类"""
+    def __init__(self):
+        self.strategy = None
+
+    @abstractmethod
+    async def start(self):
+        pass
+
+    @abstractmethod
+    async def stop(self):
+        pass
+
+    @abstractmethod
+    async def pause(self):
+        pass
+
+    def _save_status(self, status: StrategyStatus, error: str = None):
+        """保存策略状态到数据库"""
+        state = self.strategy.db_session.query(StrategyState).filter_by(
+            strategy_name=self.strategy.__class__.__name__,
+            symbol=self.strategy.symbol
+        ).first()
+        
+        if not state:
+            state = StrategyState(
+                strategy_name=self.strategy.__class__.__name__,
+                symbol=self.strategy.symbol,
+                position=Decimal('0'),
+                avg_entry_price=Decimal('0'),
+                unrealized_pnl=Decimal('0'),
+                total_pnl=Decimal('0'),
+                total_commission=Decimal('0')
+            )
+            self.strategy.db_session.add(state)
+        
+        state.status = status.value
+        state.last_error = error
+        state.last_run_time = datetime.utcnow()
+        self.strategy.db_session.commit()
+        logger.info(f"策略状态已更新: {status.value}")
+
+class RunningState(StrategyStateBase):
+    async def start(self):
+        raise Exception("Strategy is already running")
+
+    async def stop(self):
+        self._save_status(StrategyStatus.STOPPED)
+        self.strategy.set_state(StoppedState())
+        logger.info("策略已停止")
+
+    async def pause(self):
+        self._save_status(StrategyStatus.PAUSED)
+        self.strategy.set_state(PausedState())
+        logger.info("策略已暂停")
+
+class StoppedState(StrategyStateBase):
+    async def start(self):
+        self._save_status(StrategyStatus.RUNNING)
+        self.strategy.set_state(RunningState())
+        logger.info("策略已启动")
+
+    async def stop(self):
+        raise Exception("Strategy is already stopped")
+
+    async def pause(self):
+        raise Exception("Cannot pause a stopped strategy")
+
+class PausedState(StrategyStateBase):
+    async def start(self):
+        self._save_status(StrategyStatus.RUNNING)
+        self.strategy.set_state(RunningState())
+
+    async def stop(self):
+        self._save_status(StrategyStatus.STOPPED)
+        self.strategy.set_state(StoppedState())
+
+    async def pause(self):
+        raise Exception("Strategy is already paused")
+
+class ErrorState(StrategyStateBase):
+    async def start(self):
+        self._save_status(StrategyStatus.RUNNING)
+        self.strategy.set_state(RunningState())
+
+    async def stop(self):
+        self._save_status(StrategyStatus.STOPPED)
+        self.strategy.set_state(StoppedState())
+
+    async def pause(self):
+        raise Exception("Cannot pause an errored strategy")
 
 class BaseStrategy(ABC):
     def __init__(self, 
                  client: OKXClient,
                  symbol: str,
                  db_session,
-                 commission_rate: Decimal = Decimal('0.001')):  # 默认0.1%手续费
+                 commission_rate: Decimal = Decimal('0.001')):
         self.client = client
         self.symbol = symbol
         self.db_session = db_session
@@ -21,10 +113,38 @@ class BaseStrategy(ABC):
         self.avg_entry_price = Decimal('0')
         self.total_pnl = Decimal('0')
         self.total_commission = Decimal('0')
+        self._state = None
         
         # 从数据库加载策略状态
         self._load_state()
+        
+        # 如果没有找到状态记录，设置为停止状态
+        if not self._state:
+            self.set_state(StoppedState())
+            self._state._save_status(StrategyStatus.STOPPED)
     
+    def set_state(self, state: StrategyStateBase):
+        """设置策略状态"""
+        self._state = state
+        self._state.strategy = self
+
+    async def start(self):
+        """启动策略"""
+        await self._state.start()
+
+    async def stop(self):
+        """停止策略"""
+        await self._state.stop()
+
+    async def pause(self):
+        """暂停策略"""
+        await self._state.pause()
+
+    def handle_error(self, error: str):
+        """处理策略错误"""
+        self._state._save_status(StrategyStatus.ERROR, error)
+        self.set_state(ErrorState())
+
     def _load_state(self):
         """从数据库加载策略状态"""
         state = self.db_session.query(StrategyState).filter_by(
@@ -37,6 +157,16 @@ class BaseStrategy(ABC):
             self.avg_entry_price = state.avg_entry_price
             self.total_pnl = state.total_pnl
             self.total_commission = state.total_commission
+            
+            # 根据数据库状态设置当前状态
+            status_map = {
+                StrategyStatus.RUNNING.value: RunningState(),
+                StrategyStatus.STOPPED.value: StoppedState(),
+                StrategyStatus.PAUSED.value: PausedState(),
+                StrategyStatus.ERROR.value: ErrorState()
+            }
+            if state.status in status_map:
+                self.set_state(status_map[state.status])
     
     def _save_state(self):
         """保存策略状态到数据库"""
@@ -59,7 +189,13 @@ class BaseStrategy(ABC):
         state.total_commission = self.total_commission
         state.updated_at = datetime.utcnow()
         
-        self.db_session.commit()
+        try:
+            self.db_session.commit()
+            logger.debug(f"策略状态已保存: position={self.position}, avg_price={self.avg_entry_price}")
+        except Exception as e:
+            logger.error(f"保存策略状态失败: {e}")
+            self.db_session.rollback()
+            raise
     
     def _record_trade(self, side: str, price: Decimal, quantity: Decimal, 
                      commission: Decimal, realized_pnl: Decimal = Decimal('0')):

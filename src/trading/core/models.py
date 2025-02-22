@@ -1,10 +1,17 @@
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, DateTime, create_engine, DECIMAL
+from sqlalchemy import Column, Integer, String, DateTime, create_engine, DECIMAL, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from enum import Enum
 
 Base = declarative_base()
+
+class StrategyStatus(Enum):
+    STOPPED = "stopped"
+    RUNNING = "running"
+    ERROR = "error"
+    PAUSED = "paused"
 
 class TradeRecord(Base):
     __tablename__ = 'trade_records'
@@ -32,6 +39,9 @@ class StrategyState(Base):
     unrealized_pnl = Column(DECIMAL(20, 8))
     total_pnl = Column(DECIMAL(20, 8))
     total_commission = Column(DECIMAL(20, 8))
+    status = Column(String(20), default=StrategyStatus.STOPPED.value)
+    last_error = Column(Text)
+    last_run_time = Column(DateTime)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
 class BalanceSnapshot(Base):
