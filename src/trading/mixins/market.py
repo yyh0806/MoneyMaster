@@ -5,7 +5,7 @@ class MarketMixin:
     
     def get_market_price(self, instId: str) -> Dict:
         """获取市场价格"""
-        return self._request('GET', '/api/v5/market/ticker', params={'instId': instId})
+        return self._request('GET', '/market/ticker', params={'instId': instId})
         
     def get_kline(self, instId: str, bar: str = '1m', limit: str = '100', after: str = None, before: str = None) -> Dict:
         """
@@ -26,7 +26,7 @@ class MarketMixin:
         if before:
             params['before'] = before
             
-        return self._request('GET', '/api/v5/market/candles', params=params)
+        return self._request('GET', '/market/candles', params=params)
         
     def get_orderbook(self, instId: str, sz: str = '1') -> Dict:
         """
@@ -38,7 +38,7 @@ class MarketMixin:
             'instId': instId,
             'sz': sz
         }
-        return self._request('GET', '/api/v5/market/books', params=params)
+        return self._request('GET', '/market/books', params=params)
         
     def get_trades(self, instId: str, limit: str = '100') -> Dict:
         """
@@ -50,4 +50,4 @@ class MarketMixin:
             'instId': instId,
             'limit': limit
         }
-        return self._request('GET', '/api/v5/market/trades', params=params) 
+        return self._request('GET', '/market/trades', params=params) 

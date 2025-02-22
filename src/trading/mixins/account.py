@@ -5,7 +5,7 @@ class AccountMixin:
     
     def get_account_balance(self) -> Dict:
         """获取账户余额"""
-        return self._request('GET', '/api/v5/account/balance')
+        return self._request('GET', '/account/balance')
         
     def get_positions(self, instType: Optional[str] = None, instId: Optional[str] = None) -> Dict:
         """
@@ -19,15 +19,15 @@ class AccountMixin:
         if instId:
             params['instId'] = instId
             
-        return self._request('GET', '/api/v5/account/positions', params=params)
+        return self._request('GET', '/account/positions', params=params)
         
     def get_account_config(self) -> Dict:
         """获取账户配置"""
-        return self._request('GET', '/api/v5/account/config')
+        return self._request('GET', '/account/config')
         
     def get_account_position_risk(self) -> Dict:
         """获取账户持仓风险"""
-        return self._request('GET', '/api/v5/account/account-position-risk')
+        return self._request('GET', '/account/account-position-risk')
         
     def get_bills(self, 
                   instType: Optional[str] = None,
@@ -70,4 +70,4 @@ class AccountMixin:
         if before:
             params['before'] = before
             
-        return self._request('GET', '/api/v5/account/bills', params=params) 
+        return self._request('GET', '/account/bills', params=params) 

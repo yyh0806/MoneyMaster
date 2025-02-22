@@ -9,17 +9,15 @@ class TradeMixin:
                     side: str = 'buy',
                     ordType: str = 'limit',
                     sz: str = '1',
-                    px: Optional[str] = None,
-                    tgtCcy: Optional[str] = None) -> Dict:
+                    px: Optional[str] = None) -> Dict:
         """
         下单
         :param instId: 产品ID，如 'BTC-USDT'
-        :param tdMode: 交易模式，cash: 现货，isolated: 逐仓，cross: 全仓
+        :param tdMode: 交易模式，cash: 现货
         :param side: buy: 买入, sell: 卖出
         :param ordType: 订单类型，market: 市价单, limit: 限价单
         :param sz: 数量
         :param px: 价格，市价单不需要传
-        :param tgtCcy: 市价单委托数量的类型，base_ccy: 交易货币，quote_ccy: 计价货币
         """
         data = {
             'instId': instId,
@@ -30,10 +28,8 @@ class TradeMixin:
         }
         if px:
             data['px'] = px
-        if tgtCcy:
-            data['tgtCcy'] = tgtCcy
             
-        return self._request('POST', '/api/v5/trade/order', data=data)
+        return self._request('POST', '/trade/order', data=data)
         
     def place_batch_orders(self, orders: list) -> Dict:
         """
