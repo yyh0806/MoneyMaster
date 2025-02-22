@@ -1,0 +1,6 @@
+# HTTP请求
+requests==2.31.0
+
+# 工具
+python-dotenv==1.0.0
+loguru==0.7.2 
