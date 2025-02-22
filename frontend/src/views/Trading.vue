@@ -67,100 +67,8 @@
         </el-card>
       </el-col>
 
-      <!-- 策略状态卡片 -->
-      <el-col :span="6">
-        <el-card class="strategy-status">
-          <template #header>
-            <div class="card-header">
-              <span>策略状态</span>
-              <div class="strategy-controls">
-                <el-button
-                  :type="getStrategyButtonType"
-                  size="small"
-                  @click="handleStrategyAction"
-                  :loading="isLoading"
-                >
-                  {{ getStrategyButtonText }}
-                </el-button>
-                <el-button
-                  v-if="canPause"
-                  type="warning"
-                  size="small"
-                  @click="handlePause"
-                  :loading="isLoading"
-                >
-                  暂停
-                </el-button>
-              </div>
-            </div>
-          </template>
-          <div class="strategy-info">
-            <div class="info-item">
-              <span class="label">状态:</span>
-              <el-tag :type="getStatusTagType">
-                {{ getStatusText }}
-              </el-tag>
-            </div>
-            <div class="info-item" v-if="strategyState.last_error">
-              <span class="label">错误信息:</span>
-              <span class="value text-danger">{{ strategyState.last_error }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">最后运行时间:</span>
-              <span class="value">{{ formatLastRunTime }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">当前持仓:</span>
-              <span class="value">{{ formatQuantity(strategyState.position) }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">持仓均价:</span>
-              <span class="value">{{ formatPrice(strategyState.avg_entry_price) }}</span>
-            </div>
-            <div class="info-item">
-              <span class="label">未实现盈亏:</span>
-              <el-tooltip
-                content="未实现盈亏 = (当前市价 - 持仓均价) × 持仓数量。这是当前持仓的预计盈亏，尚未通过交易实现。"
-                placement="top"
-              >
-                <span class="value" :class="pnlClass(strategyState.unrealized_pnl)">
-                  {{ formatPnL(strategyState.unrealized_pnl) }}
-                </span>
-              </el-tooltip>
-            </div>
-            <div class="info-item">
-              <span class="label">总盈亏:</span>
-              <el-tooltip
-                content="总盈亏 = 已实现盈亏 + 未实现盈亏。绿色表示盈利，红色表示亏损。"
-                placement="top"
-              >
-                <span class="value" :class="pnlClass(strategyState.total_pnl)">
-                  {{ formatPnL(strategyState.total_pnl) }}
-                </span>
-              </el-tooltip>
-            </div>
-            <div class="info-item">
-              <span class="label">总手续费:</span>
-              <el-tooltip
-                content="所有交易产生的手续费总和"
-                placement="top"
-              >
-                <span class="value">{{ formatPrice(strategyState.total_commission) }}</span>
-              </el-tooltip>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 剩余空间 -->
-      <el-col :span="15">
-        <!-- 这里可以放置其他内容 -->
-      </el-col>
-    </el-row>
-
-    <!-- 市场走势图卡片 -->
-    <el-row>
-      <el-col :span="12">
+      <!-- 市场走势图卡片 -->
+      <el-col :span="21">
         <el-card class="market-chart">
           <template #header>
             <div class="card-header">
@@ -191,64 +99,245 @@
       </el-col>
     </el-row>
 
+    <!-- 策略状态卡片行 -->
+    <el-row :gutter="20">
+      <!-- 杨二狗策略 -->
+      <el-col :span="6">
+        <el-card class="strategy-status">
+          <template #header>
+            <div class="card-header">
+              <span>杨二狗</span>
+              <div class="strategy-controls">
+                <el-button
+                  :type="getStrategyButtonType"
+                  size="small"
+                  @click="handleStrategyAction"
+                  :loading="isLoading"
+                >
+                  {{ getStrategyButtonText }}
+                </el-button>
+                <el-button
+                  v-if="canPause"
+                  type="warning"
+                  size="small"
+                  @click="handlePause"
+                  :loading="isLoading"
+                >
+                  暂停
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <div class="strategy-info">
+            <!-- 思考过程 -->
+            <div class="thinking-process">
+              <div class="section-title">思考过程</div>
+              <div class="analysis-section">
+                <div class="reasoning">
+                  <p>{{ analysis.reasoning }}</p>
+                </div>
+                
+                <div class="analysis-content" v-html="formattedAnalysis"></div>
+                
+                <div class="recommendation">
+                  <div class="rec-header">
+                    <span class="label">交易建议:</span>
+                    <span :class="['value', recommendationClass]">{{ analysis.recommendation }}</span>
+                  </div>
+                  <div class="confidence">
+                    <span class="label">信心度:</span>
+                    <div class="confidence-bar">
+                      <div :style="{ width: `${analysis.confidence * 100}%` }" class="confidence-fill"></div>
+                    </div>
+                    <span class="confidence-value">{{ (analysis.confidence * 100).toFixed(1) }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 盈亏信息 -->
+            <div class="pnl-info">
+              <div class="section-title">盈亏信息</div>
+              <div class="info-item">
+                <span class="label">当前持仓:</span>
+                <span class="value">{{ formatQuantity(strategyState.position) }}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">持仓均价:</span>
+                <span class="value">{{ formatPrice(strategyState.avg_entry_price) }}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">未实现盈亏:</span>
+                <el-tooltip
+                  content="未实现盈亏 = (当前市价 - 持仓均价) × 持仓数量。这是当前持仓的预计盈亏，尚未通过交易实现。"
+                  placement="top"
+                >
+                  <span class="value" :class="pnlClass(strategyState.unrealized_pnl)">
+                    {{ formatPnL(strategyState.unrealized_pnl) }}
+                  </span>
+                </el-tooltip>
+              </div>
+              <div class="info-item">
+                <span class="label">总盈亏:</span>
+                <el-tooltip
+                  content="总盈亏 = 已实现盈亏 + 未实现盈亏。绿色表示盈利，红色表示亏损。"
+                  placement="top"
+                >
+                  <span class="value" :class="pnlClass(strategyState.total_pnl)">
+                    {{ formatPnL(strategyState.total_pnl) }}
+                  </span>
+                </el-tooltip>
+              </div>
+              <div class="info-item">
+                <span class="label">总手续费:</span>
+                <el-tooltip
+                  content="所有交易产生的手续费总和"
+                  placement="top"
+                >
+                  <span class="value">{{ formatPrice(strategyState.total_commission) }}</span>
+                </el-tooltip>
+              </div>
+            </div>
+
+            <!-- 状态信息 -->
+            <div class="status-info">
+              <div class="section-title">状态信息</div>
+              <div class="info-item">
+                <span class="label">状态:</span>
+                <el-tag :type="getStatusTagType">
+                  {{ getStatusText }}
+                </el-tag>
+              </div>
+              <div class="info-item" v-if="strategyState.last_error">
+                <span class="label">错误信息:</span>
+                <span class="value text-danger">{{ strategyState.last_error }}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">最后运行时间:</span>
+                <span class="value">{{ formatLastRunTime }}</span>
+              </div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+
+      <!-- 策略2（占位） -->
+      <el-col :span="6">
+        <el-card class="strategy-status">
+          <template #header>
+            <div class="card-header">
+              <span>策略2</span>
+              <div class="strategy-controls">
+                <el-button type="success" size="small" disabled>启动策略</el-button>
+              </div>
+            </div>
+          </template>
+          <div class="strategy-info">
+            <div class="section-title">开发中</div>
+            <p class="placeholder-text">该策略正在开发中...</p>
+          </div>
+        </el-card>
+      </el-col>
+
+      <!-- 策略3（占位） -->
+      <el-col :span="6">
+        <el-card class="strategy-status">
+          <template #header>
+            <div class="card-header">
+              <span>策略3</span>
+              <div class="strategy-controls">
+                <el-button type="success" size="small" disabled>启动策略</el-button>
+              </div>
+            </div>
+          </template>
+          <div class="strategy-info">
+            <div class="section-title">开发中</div>
+            <p class="placeholder-text">该策略正在开发中...</p>
+          </div>
+        </el-card>
+      </el-col>
+
+      <!-- 策略4（占位） -->
+      <el-col :span="6">
+        <el-card class="strategy-status">
+          <template #header>
+            <div class="card-header">
+              <span>策略4</span>
+              <div class="strategy-controls">
+                <el-button type="success" size="small" disabled>启动策略</el-button>
+              </div>
+            </div>
+          </template>
+          <div class="strategy-info">
+            <div class="section-title">开发中</div>
+            <p class="placeholder-text">该策略正在开发中...</p>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 交易记录表格 -->
-    <el-card class="trade-history">
-      <template #header>
-        <div class="card-header">
-          <span>交易记录</span>
-          <el-button
-            type="danger"
-            size="small"
-            @click="handleClearHistory"
-            :loading="isClearing"
-          >
-            清空历史
-          </el-button>
-        </div>
-      </template>
-      <div class="table-container">
-        <el-table :data="tradeHistory" style="width: 100%" height="400">
-          <el-table-column prop="trade_time" label="时间" min-width="200" align="center">
-            <template #default="scope">
-              {{ formatDateTime(scope.row.trade_time) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="side" label="方向" width="100" align="center">
-            <template #default="scope">
-              <el-tag :type="scope.row.side === 'BUY' ? 'success' : 'danger'">
-                {{ scope.row.side === 'BUY' ? '买入' : '卖出' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="price" label="价格" width="140" align="right">
-            <template #default="scope">
-              {{ formatPrice(scope.row.price) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="quantity" label="数量" width="140" align="right">
-            <template #default="scope">
-              {{ formatQuantity(scope.row.quantity) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="commission" label="手续费" width="120" align="right">
-            <template #default="scope">
-              {{ formatPrice(scope.row.commission) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="realized_pnl" label="实现盈亏" width="140" align="right">
-            <template #default="scope">
-              <span :class="pnlClass(scope.row.realized_pnl)">
-                {{ scope.row.realized_pnl === 0 ? '-' : formatPnL(scope.row.realized_pnl) }}
-              </span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-    </el-card>
+    <el-row>
+      <el-col :span="24">
+        <el-card class="trade-history">
+          <template #header>
+            <div class="card-header">
+              <span>交易记录</span>
+              <el-button
+                type="danger"
+                size="small"
+                @click="handleClearHistory"
+                :loading="isClearing"
+              >
+                清空历史
+              </el-button>
+            </div>
+          </template>
+          <div class="table-container">
+            <el-table :data="tradeHistory" style="width: 100%" height="400">
+              <el-table-column prop="trade_time" label="时间" min-width="200" align="center">
+                <template #default="scope">
+                  {{ formatDateTime(scope.row.trade_time) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="side" label="方向" width="100" align="center">
+                <template #default="scope">
+                  <el-tag :type="scope.row.side === 'BUY' ? 'success' : 'danger'">
+                    {{ scope.row.side === 'BUY' ? '买入' : '卖出' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="price" label="价格" width="140" align="right">
+                <template #default="scope">
+                  {{ formatPrice(scope.row.price) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="quantity" label="数量" width="140" align="right">
+                <template #default="scope">
+                  {{ formatQuantity(scope.row.quantity) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="commission" label="手续费" width="120" align="right">
+                <template #default="scope">
+                  {{ formatPrice(scope.row.commission) }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="realized_pnl" label="实现盈亏" width="140" align="right">
+                <template #default="scope">
+                  <span :class="pnlClass(scope.row.realized_pnl)">
+                    {{ scope.row.realized_pnl === 0 ? '-' : formatPnL(scope.row.realized_pnl) }}
+                  </span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight } from '@element-plus/icons-vue'
@@ -271,6 +360,27 @@ let chart = null
 const isLoading = ref(false)
 const isClearing = ref(false)
 const drawerVisible = ref(false)
+
+// AI思考过程相关数据
+const analysis = ref({
+  analysis: '',
+  recommendation: 'HOLD',
+  confidence: 0,
+  reasoning: ''
+})
+
+const formattedAnalysis = computed(() => {
+  return analysis.value.analysis.split('\n').join('<br>')
+})
+
+const recommendationClass = computed(() => {
+  const rec = analysis.value.recommendation
+  return {
+    'buy': rec === 'BUY',
+    'sell': rec === 'SELL',
+    'hold': rec === 'HOLD'
+  }
+})
 
 // 格式化函数
 const formatPrice = (price) => price ? `$${Number(price).toFixed(2)}` : '-'
@@ -315,6 +425,10 @@ const connectWebSocket = () => {
       if (data.strategy) {
         console.log('收到策略状态更新:', data.strategy)
         strategyState.value = data.strategy
+      }
+      if (data.analysis) {
+        console.log('收到AI分析更新:', data.analysis)
+        analysis.value = data.analysis
       }
     } catch (error) {
       console.error('处理WebSocket消息失败:', error)
@@ -1025,5 +1139,158 @@ let refreshInterval = setInterval(() => {
 .value {
   font-weight: bold;
   font-size: 14px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #909399;
+  margin: 15px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #262626;
+}
+
+.thinking-process {
+  margin-top: 20px;
+}
+
+.analysis-section {
+  background: transparent;
+  padding: 0;
+}
+
+.analysis-content {
+  margin: 10px 0;
+  line-height: 1.6;
+  color: #E5E7EB;
+  font-size: 14px;
+}
+
+.recommendation {
+  margin: 15px 0;
+  padding: 10px;
+  background: #18181b;
+  border-radius: 6px;
+}
+
+.rec-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.buy {
+  color: #67C23A;
+}
+
+.sell {
+  color: #F56C6C;
+}
+
+.hold {
+  color: #60a5fa;
+}
+
+.confidence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.confidence-bar {
+  flex: 1;
+  height: 6px;
+  background: #262626;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.confidence-fill {
+  height: 100%;
+  background: #60a5fa;
+  transition: width 0.3s ease;
+}
+
+.confidence-value {
+  min-width: 60px;
+  text-align: right;
+  font-size: 12px;
+  color: #909399;
+}
+
+.reasoning {
+  margin-top: 15px;
+  color: #E5E7EB;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.reasoning p {
+  margin: 0;
+  padding: 10px;
+  background: #18181b;
+  border-radius: 6px;
+}
+
+.strategy-info {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.thinking-process,
+.pnl-info,
+.status-info {
+  background: #18181b;
+  border-radius: 8px;
+  padding: 15px;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #E5E7EB;
+  margin-bottom: 15px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #262626;
+}
+
+.reasoning {
+  margin-bottom: 20px;
+}
+
+.reasoning p {
+  margin: 0;
+  padding: 15px;
+  background: #262626;
+  border-radius: 6px;
+  color: #E5E7EB;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.analysis-content {
+  margin: 15px 0;
+  padding: 15px;
+  background: #262626;
+  border-radius: 6px;
+  color: #E5E7EB;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.recommendation {
+  margin-top: 15px;
+  padding: 15px;
+  background: #262626;
+  border-radius: 6px;
+}
+
+.placeholder-text {
+  color: #909399;
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
 }
 </style> 
