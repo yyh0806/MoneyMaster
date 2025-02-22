@@ -94,6 +94,26 @@
       </el-col>
     </el-row>
 
+    <!-- 市场走势图卡片 -->
+    <el-card class="market-chart">
+      <template #header>
+        <div class="card-header">
+          <span>市场走势图</span>
+          <div class="chart-controls">
+            <el-select v-model="selectedPeriod" size="small" @change="fetchKlineData">
+              <el-option label="1分钟" value="1m" />
+              <el-option label="5分钟" value="5m" />
+              <el-option label="15分钟" value="15m" />
+              <el-option label="1小时" value="1H" />
+              <el-option label="4小时" value="4H" />
+              <el-option label="1天" value="1D" />
+            </el-select>
+          </div>
+        </div>
+      </template>
+      <div ref="chartContainer" style="height: 400px;"></div>
+    </el-card>
+
     <!-- 交易记录表格 -->
     <el-card class="trade-history">
       <template #header>
@@ -146,6 +166,7 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 import dayjs from 'dayjs'
+import * as echarts from 'echarts'
 
 // 使用相对路径
 const API_BASE_URL = ''
@@ -155,7 +176,10 @@ const strategyState = ref({})
 const accountBalances = ref({})
 const tradeHistory = ref([])
 const isStrategyRunning = ref(false)
+const selectedPeriod = ref('15m')
+const chartContainer = ref(null)
 let ws = null
+let chart = null
 
 // 格式化函数
 const formatPrice = (price) => price ? `$${Number(price).toFixed(2)}` : '-'
@@ -228,29 +252,199 @@ const toggleStrategy = async () => {
   }
 }
 
-// 定时刷新数据
-let refreshInterval
+// 格式化K线数据
+const formatKlineData = (data) => {
+  return data.map(item => ({
+    time: dayjs(parseInt(item[0])).format('YYYY-MM-DD HH:mm'),
+    open: parseFloat(item[1]),
+    high: parseFloat(item[2]),
+    low: parseFloat(item[3]),
+    close: parseFloat(item[4]),
+    volume: parseFloat(item[5])
+  }))
+}
+
+// 初始化图表
+const initChart = () => {
+  if (chart) {
+    chart.dispose()
+  }
+  chart = echarts.init(chartContainer.value)
+}
+
+// 更新图表
+const updateChart = (klineData) => {
+  if (!chart) {
+    initChart()
+  }
+
+  const option = {
+    animation: false,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'cross'
+      },
+      formatter: (params) => {
+        const candleData = params.find(p => p.seriesName === '价格')?.data || []
+        const volumeData = params.find(p => p.seriesName === '成交量')?.data || 0
+        return `
+          时间: ${params[0].axisValue}<br/>
+          开盘: $${Number(candleData[0]).toFixed(2)}<br/>
+          最高: $${Number(candleData[3]).toFixed(2)}<br/>
+          最低: $${Number(candleData[2]).toFixed(2)}<br/>
+          收盘: $${Number(candleData[1]).toFixed(2)}<br/>
+          成交量: ${Number(volumeData).toFixed(4)}
+        `
+      }
+    },
+    legend: {
+      data: ['价格', '成交量'],
+      top: 0
+    },
+    grid: [{
+      left: '10%',
+      right: '10%',
+      height: '60%'
+    }, {
+      left: '10%',
+      right: '10%',
+      top: '75%',
+      height: '15%'
+    }],
+    xAxis: [{
+      type: 'category',
+      data: klineData.map(item => item.time),
+      scale: true,
+      boundaryGap: false,
+      axisLine: { onZero: false },
+      splitLine: { show: false },
+      min: 'dataMin',
+      max: 'dataMax',
+      axisLabel: {
+        formatter: (value) => dayjs(value).format('HH:mm')
+      }
+    }, {
+      type: 'category',
+      gridIndex: 1,
+      data: klineData.map(item => item.time),
+      scale: true,
+      boundaryGap: false,
+      axisLine: { onZero: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      min: 'dataMin',
+      max: 'dataMax'
+    }],
+    yAxis: [{
+      scale: true,
+      splitArea: { show: true },
+      axisLabel: {
+        formatter: (value) => `$${value}`
+      }
+    }, {
+      scale: true,
+      gridIndex: 1,
+      splitNumber: 2,
+      axisLabel: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false }
+    }],
+    dataZoom: [{
+      type: 'inside',
+      xAxisIndex: [0, 1],
+      start: 0,
+      end: 100
+    }, {
+      show: true,
+      xAxisIndex: [0, 1],
+      type: 'slider',
+      bottom: '5%',
+      start: 0,
+      end: 100
+    }],
+    series: [{
+      name: '价格',
+      type: 'candlestick',
+      data: klineData.map(item => [
+        item.open,
+        item.close,
+        item.low,
+        item.high
+      ]),
+      itemStyle: {
+        color: '#67C23A',
+        color0: '#F56C6C',
+        borderColor: '#67C23A',
+        borderColor0: '#F56C6C'
+      }
+    }, {
+      name: '成交量',
+      type: 'bar',
+      xAxisIndex: 1,
+      yAxisIndex: 1,
+      data: klineData.map(item => ({
+        value: item.volume,
+        itemStyle: {
+          color: item.close > item.open ? '#67C23A' : '#F56C6C'
+        }
+      }))
+    }]
+  }
+
+  chart.setOption(option, true)
+}
+
+// 获取K线数据
+const fetchKlineData = async () => {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}/api/market/kline/${symbol.value}?interval=${selectedPeriod.value}`
+    )
+    if (response.data?.code === '0' && response.data?.data) {
+      const klineData = formatKlineData(response.data.data)
+      updateChart(klineData)
+    } else {
+      ElMessage.error(response.data?.msg || '获取K线数据失败')
+    }
+  } catch (error) {
+    ElMessage.error('获取K线数据失败')
+  }
+}
+
+// 监听窗口大小变化
+const handleResize = () => {
+  if (chart) {
+    chart.resize()
+  }
+}
 
 onMounted(() => {
   connectWebSocket()
   fetchTradeHistory()
   fetchAccountBalance()
-  
-  // 每分钟刷新一次数据
-  refreshInterval = setInterval(() => {
-    fetchTradeHistory()
-    fetchAccountBalance()
-  }, 60000)
+  fetchKlineData()
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
   if (ws) {
     ws.close()
   }
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
+  window.removeEventListener('resize', handleResize)
+  if (chart) {
+    chart.dispose()
   }
 })
+
+// 添加到定时刷新
+let refreshInterval = setInterval(() => {
+  fetchTradeHistory()
+  fetchAccountBalance()
+  fetchKlineData()
+}, 60000)
 </script>
 
 <style scoped>
@@ -305,6 +499,15 @@ onUnmounted(() => {
 }
 
 .strategy-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.market-chart {
+  margin-bottom: 20px;
+}
+
+.chart-controls {
   display: flex;
   gap: 10px;
 }

@@ -69,9 +69,29 @@ async def get_market_price(symbol: str):
     return okx_client.get_market_price(symbol)
 
 @app.get("/api/market/kline/{symbol}")
-async def get_kline(symbol: str, interval: str = "1m", limit: str = "100"):
+async def get_kline(symbol: str, interval: str = "15m"):
     """获取K线数据"""
-    return okx_client.get_kline(symbol, bar=interval, limit=limit)
+    try:
+        logger.info(f"请求K线数据: symbol={symbol}, interval={interval}")
+        response = okx_client.get_kline(
+            instId=symbol,
+            bar=interval,
+            limit="100"  # 获取最近100根K线
+        )
+        logger.debug(f"OKX K线数据响应: {response}")
+        
+        if response.get('code') == '0':
+            # 按时间正序排列
+            data = sorted(response.get('data', []), key=lambda x: x[0])
+            return {"code": "0", "msg": "", "data": data}
+        else:
+            error_msg = f"获取K线数据失败: {response.get('msg', '未知错误')}"
+            logger.error(error_msg)
+            return {"code": "1", "msg": error_msg, "data": []}
+    except Exception as e:
+        error_msg = f"获取K线数据异常: {str(e)}"
+        logger.error(error_msg)
+        return {"code": "1", "msg": error_msg, "data": []}
 
 @app.get("/api/trades")
 async def get_trades(symbol: str = None, limit: int = 100):

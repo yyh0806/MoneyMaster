@@ -105,4 +105,33 @@ class OKXClient(HTTPClient, MarketMixin, AccountMixin, TradeMixin):
             
     def get_market_price(self, instId: str) -> Dict:
         """获取市场价格"""
-        return self._request('GET', '/api/v5/market/ticker', params={'instId': instId}) 
+        return self._request('GET', '/api/v5/market/ticker', params={'instId': instId})
+
+    def get_kline(self, instId: str, bar: str = '1m', limit: str = '100') -> Dict:
+        """
+        获取K线数据
+        :param instId: 产品ID，如 'BTC-USDT'
+        :param bar: K线周期，如 '1m', '5m', '15m', '1H', '4H', '1D'
+        :param limit: 返回的结果集数量，最大值为100
+        """
+        params = {
+            'instId': instId,
+            'limit': limit
+        }
+        if bar == '1m':
+            params['bar'] = '1m'
+        elif bar == '5m':
+            params['bar'] = '5m'
+        elif bar == '15m':
+            params['bar'] = '15m'
+        elif bar == '1H':
+            params['bar'] = '1H'
+        elif bar == '4H':
+            params['bar'] = '4H'
+        elif bar == '1D':
+            params['bar'] = '1D'
+        else:
+            params['bar'] = '15m'  # 默认使用15分钟
+
+        logger.debug(f"获取K线数据，参数: {params}")
+        return self._request('GET', '/api/v5/market/history-candles', params=params) 
