@@ -1,8 +1,38 @@
 <template>
   <div class="trading-view">
+    <!-- 添加抽屉按钮 -->
+    <div
+      class="drawer-trigger"
+      @click="drawerVisible = true"
+    >
+      <el-icon class="trigger-icon"><ArrowRight /></el-icon>
+      <span class="trigger-text">账户信息</span>
+    </div>
+
+    <!-- 抽屉组件 -->
+    <el-drawer
+      v-model="drawerVisible"
+      title="账户信息"
+      direction="ltr"
+      size="300px"
+      :with-header="true"
+      class="account-drawer"
+    >
+      <div class="drawer-content">
+        <el-card class="account-info">
+          <div class="balance-info">
+            <div v-for="(balance, currency) in accountBalances" :key="currency" class="balance-item">
+              <span class="label">{{ currency }}:</span>
+              <span class="value">{{ formatBalance(balance) }}</span>
+            </div>
+          </div>
+        </el-card>
+      </div>
+    </el-drawer>
+
     <el-row :gutter="20">
       <!-- 市场数据卡片 -->
-      <el-col :span="8">
+      <el-col :span="12">
         <el-card class="market-data">
           <template #header>
             <div class="card-header">
@@ -31,7 +61,7 @@
       </el-col>
 
       <!-- 策略状态卡片 -->
-      <el-col :span="8">
+      <el-col :span="12">
         <el-card class="strategy-status">
           <template #header>
             <div class="card-header">
@@ -110,23 +140,6 @@
               >
                 <span class="value">{{ formatPrice(strategyState.total_commission) }}</span>
               </el-tooltip>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 账户信息卡片 -->
-      <el-col :span="8">
-        <el-card class="account-info">
-          <template #header>
-            <div class="card-header">
-              <span>账户信息</span>
-            </div>
-          </template>
-          <div class="balance-info">
-            <div v-for="(balance, currency) in accountBalances" :key="currency" class="balance-item">
-              <span class="label">{{ currency }}:</span>
-              <span class="value">{{ formatBalance(balance) }}</span>
             </div>
           </div>
         </el-card>
@@ -213,6 +226,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowRight } from '@element-plus/icons-vue'
 import axios from 'axios'
 import dayjs from 'dayjs'
 import * as echarts from 'echarts'
@@ -231,6 +245,7 @@ let ws = null
 let chart = null
 const isLoading = ref(false)
 const isClearing = ref(false)
+const drawerVisible = ref(false)
 
 // 格式化函数
 const formatPrice = (price) => price ? `$${Number(price).toFixed(2)}` : '-'
@@ -509,10 +524,19 @@ const updateChart = (klineData) => {
 
   const option = {
     animation: false,
+    backgroundColor: '#000000',
+    textStyle: {
+      color: '#ffffff'
+    },
     tooltip: {
       trigger: 'axis',
       axisPointer: {
         type: 'cross'
+      },
+      backgroundColor: '#141414',
+      borderColor: '#262626',
+      textStyle: {
+        color: '#ffffff'
       },
       formatter: (params) => {
         const candleData = params.find(p => p.seriesName === '价格')
@@ -564,12 +588,21 @@ const updateChart = (klineData) => {
       data: klineData.map(item => item.time),
       scale: true,
       boundaryGap: false,
-      axisLine: { onZero: false },
-      splitLine: { show: false },
-      min: 'dataMin',
-      max: 'dataMax',
+      axisLine: { 
+        onZero: false,
+        lineStyle: {
+          color: '#404040'
+        }
+      },
+      splitLine: { 
+        show: true,
+        lineStyle: {
+          color: '#1a1a1a'
+        }
+      },
       axisLabel: {
-        formatter: (value) => dayjs(value).format('HH:mm')
+        formatter: (value) => dayjs(value).format('HH:mm'),
+        color: '#808080'
       }
     }, {
       type: 'category',
@@ -577,7 +610,12 @@ const updateChart = (klineData) => {
       data: klineData.map(item => item.time),
       scale: true,
       boundaryGap: false,
-      axisLine: { onZero: false },
+      axisLine: { 
+        onZero: false,
+        lineStyle: {
+          color: '#404040'
+        }
+      },
       axisTick: { show: false },
       splitLine: { show: false },
       axisLabel: { show: false },
@@ -586,9 +624,25 @@ const updateChart = (klineData) => {
     }],
     yAxis: [{
       scale: true,
-      splitArea: { show: true },
+      splitArea: { 
+        show: true,
+        areaStyle: {
+          color: ['#000000', '#0a0a0a']
+        }
+      },
+      splitLine: {
+        lineStyle: {
+          color: '#1a1a1a'
+        }
+      },
+      axisLine: {
+        lineStyle: {
+          color: '#404040'
+        }
+      },
       axisLabel: {
-        formatter: (value) => `$${value}`
+        formatter: (value) => `$${value}`,
+        color: '#808080'
       }
     }, {
       scale: true,
@@ -610,7 +664,45 @@ const updateChart = (klineData) => {
       type: 'slider',
       bottom: '5%',
       start: 0,
-      end: 100
+      end: 100,
+      backgroundColor: '#141414',
+      borderColor: '#262626',
+      fillerColor: 'rgba(38, 38, 38, 0.2)',
+      handleStyle: {
+        color: '#606060',
+        borderColor: '#808080'
+      },
+      moveHandleStyle: {
+        color: '#606060',
+        borderColor: '#808080'
+      },
+      selectedDataBackground: {
+        lineStyle: {
+          color: '#606060'
+        },
+        areaStyle: {
+          color: '#262626'
+        }
+      },
+      emphasis: {
+        handleStyle: {
+          borderColor: '#909090'
+        },
+        moveHandleStyle: {
+          borderColor: '#909090'
+        }
+      },
+      dataBackground: {
+        lineStyle: {
+          color: '#404040'
+        },
+        areaStyle: {
+          color: '#262626'
+        }
+      },
+      textStyle: {
+        color: '#808080'
+      }
     }],
     series: [{
       name: '价格',
@@ -728,6 +820,63 @@ let refreshInterval = setInterval(() => {
   padding: 20px;
 }
 
+.drawer-trigger {
+  position: fixed;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  background-color: #141414;
+  border: 1px solid #262626;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+  padding: 12px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+
+  &:hover {
+    background-color: #262626;
+    .trigger-icon {
+      transform: translateX(3px);
+    }
+  }
+
+  .trigger-icon {
+    font-size: 20px;
+    color: #60a5fa;
+    transition: transform 0.3s ease;
+  }
+
+  .trigger-text {
+    writing-mode: vertical-lr;
+    letter-spacing: 2px;
+    color: #e5e7eb;
+    font-size: 14px;
+  }
+}
+
+.drawer-content {
+  height: 100%;
+  padding: 0;
+  
+  .account-info {
+    height: 100%;
+    border: none;
+    background-color: transparent;
+    
+    .balance-info {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+  }
+}
+
 .el-row {
   margin-bottom: 20px;
 }
@@ -795,5 +944,9 @@ let refreshInterval = setInterval(() => {
 
 .trade-history .el-card__body {
   padding: 10px 20px;
+}
+
+.account-drawer {
+  /* Add your styles here */
 }
 </style> 

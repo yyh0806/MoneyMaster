@@ -3,13 +3,10 @@ import './style.css'
 import App from './App.vue'
 import router from './router'
 
-// 引入naive-ui样式
-import 'vfonts/Lato.css'
-import 'vfonts/FiraCode.css'
-
 // 引入Element Plus
 import ElementPlus from 'element-plus'
-import 'element-plus/dist/index.css'
+// 使用自定义主题
+import './styles/index.scss'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 
 const app = createApp(App)

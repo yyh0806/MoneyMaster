@@ -1,0 +1,72 @@
+@forward 'element-plus/theme-chalk/src/common/var.scss' with (
+  $colors: (
+    'primary': (
+      'base': #60a5fa,
+    ),
+    'success': (
+      'base': #34d399,
+    ),
+    'warning': (
+      'base': #fbbf24,
+    ),
+    'danger': (
+      'base': #f87171,
+    ),
+    'error': (
+      'base': #f87171,
+    ),
+    'info': (
+      'base': #9ca3af,
+    ),
+  ),
+  $bg-color: (
+    'page': #000000,
+    'overlay': #141414,
+    '': #000000,
+  ),
+  $border-color: (
+    'base': #262626,
+    'light': #404040,
+    'lighter': #525252,
+    'extra-light': #737373
+  ),
+  $text-color: (
+    'primary': #ffffff,
+    'regular': #e5e7eb,
+    'secondary': #a3a3a3,
+    'placeholder': #737373,
+    'disabled': #525252
+  ),
+  $fill-color: (
+    '': #141414,
+    'light': #262626,
+    'lighter': #404040,
+    'extra-light': #525252,
+    'dark': #000000,
+    'darker': #000000,
+    'blank': #000000
+  ),
+  $box-shadow: (
+    'base': (0 2px 4px rgba(0, 0, 0, 0.8)),
+    'light': (0 1px 2px rgba(0, 0, 0, 0.5)),
+    'lighter': (0 1px 2px rgba(0, 0, 0, 0.3)),
+    'dark': (0 4px 6px rgba(0, 0, 0, 1))
+  ),
+  $disabled: (
+    'bg-color': #141414,
+    'text-color': #525252,
+    'border-color': #262626
+  ),
+  $card: (
+    'bg-color': #141414
+  ),
+  $table: (
+    'bg-color': #141414,
+    'tr-bg-color': #141414,
+    'border-color': #262626,
+    'header-bg-color': #000000
+  ),
+  $button-padding-horizontal: (
+    'default': 16px,
+  )
+); 

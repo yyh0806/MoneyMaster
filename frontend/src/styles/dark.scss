@@ -1,0 +1,106 @@
+// 全局暗色主题样式
+html, body {
+  background-color: #000000;
+  color: #ffffff;
+  min-height: 100%;
+}
+
+#app {
+  background-color: #000000;
+  min-height: 100vh;
+}
+
+.trading-view {
+  background-color: #000000;
+  min-height: 100vh;
+}
+
+// 覆盖一些Element Plus的默认样式
+.el-drawer {
+  background-color: #141414;
+  border-right: 1px solid #262626;
+  
+  &__header {
+    color: #ffffff;
+    border-bottom: 1px solid #262626;
+    margin-bottom: 0;
+    padding: 16px 20px;
+  }
+  
+  &__body {
+    padding: 20px;
+  }
+  
+  .el-card {
+    background-color: #1a1a1a;
+    border-color: #262626;
+    margin-bottom: 0;
+  }
+}
+
+.el-card {
+  --el-card-bg-color: #141414;
+  border-color: #262626;
+  color: #ffffff;
+
+  .el-card__header {
+    border-bottom-color: #262626;
+  }
+}
+
+.el-table {
+  --el-table-border-color: #262626;
+  --el-table-border: 1px solid #262626;
+  --el-table-text-color: #ffffff;
+  --el-table-header-text-color: #e5e7eb;
+  --el-table-header-bg-color: #000000;
+  --el-table-row-hover-bg-color: #262626;
+  
+  th.el-table__cell {
+    background-color: #000000;
+  }
+}
+
+.el-button {
+  &.el-button--default {
+    --el-button-bg-color: #262626;
+    --el-button-border-color: #404040;
+    --el-button-hover-bg-color: #404040;
+    --el-button-hover-border-color: #525252;
+    --el-button-active-bg-color: #525252;
+    --el-button-active-border-color: #737373;
+  }
+}
+
+.el-input {
+  --el-input-bg-color: #262626;
+  --el-input-border-color: #404040;
+  --el-input-hover-border-color: #525252;
+  --el-input-focus-border-color: #60a5fa;
+  
+  .el-input__wrapper {
+    background-color: #262626;
+  }
+}
+
+.el-select {
+  .el-select__popper {
+    background-color: #141414;
+    border-color: #262626;
+    
+    .el-select-dropdown__item {
+      &.hover, &:hover {
+        background-color: #262626;
+      }
+      
+      &.selected {
+        background-color: #404040;
+      }
+    }
+  }
+}
+
+// 图表暗色主题
+.echarts-container {
+  background-color: #000000;
+} 
