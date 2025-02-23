@@ -43,6 +43,13 @@ class StrategyState(Base):
     last_error = Column(Text)
     last_run_time = Column(DateTime)
     updated_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 资金管理相关字段
+    initial_capital = Column(DECIMAL(20, 8))  # 初始资金
+    current_capital = Column(DECIMAL(20, 8))  # 当前总资金
+    available_capital = Column(DECIMAL(20, 8))  # 可用资金
+    max_position_size = Column(DECIMAL(20, 8))  # 最大持仓比例
+    max_single_trade_size = Column(DECIMAL(20, 8))  # 单次交易最大比例
 
 class BalanceSnapshot(Base):
     __tablename__ = 'balance_snapshots'

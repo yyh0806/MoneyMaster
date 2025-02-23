@@ -16,6 +16,21 @@ class RiskLimit:
     max_order_value: Decimal       # 单笔订单最大价值
     min_order_value: Decimal       # 单笔订单最小价值
     price_deviation: Decimal       # 价格偏离度限制（相对于市场价格）
+    
+    # 资金限制相关
+    total_capital: Decimal         # 策略总资金
+    max_capital_usage: Decimal     # 最大资金使用比例
+    reserve_capital: Decimal       # 保证金准备金
+    
+    @property
+    def max_available_capital(self) -> Decimal:
+        """最大可用资金"""
+        return self.total_capital * self.max_capital_usage - self.reserve_capital
+        
+    @property
+    def max_position_capital(self) -> Decimal:
+        """最大持仓资金"""
+        return min(self.max_position_value, self.max_available_capital)
 
 class RiskManager:
     """风险管理器"""
@@ -24,6 +39,7 @@ class RiskManager:
         self.risk_limit = risk_limit
         self.daily_pnl = Decimal('0')
         self.last_pnl_reset = datetime.now()
+        self.used_capital = Decimal('0')  # 当前已使用资金
         
     def reset_daily_pnl(self):
         """重置每日盈亏"""
@@ -98,4 +114,25 @@ class RiskManager:
         if self.daily_pnl < -self.risk_limit.max_daily_loss:
             return False, "达到每日最大亏损限制"
             
-        return True, "" 
+        return True, ""
+
+    def get_risk_info(self) -> dict:
+        """获取风险信息"""
+        return {
+            "total_capital": float(self.risk_limit.total_capital),
+            "max_available_capital": float(self.risk_limit.max_available_capital),
+            "used_capital": float(self.used_capital),
+            "remaining_capital": float(self.risk_limit.max_available_capital - self.used_capital),
+            "max_position_value": float(self.risk_limit.max_position_value),
+            "max_position_capital": float(self.risk_limit.max_position_capital),
+            "max_leverage": self.risk_limit.max_leverage,
+            "min_margin_ratio": float(self.risk_limit.min_margin_ratio),
+            "max_daily_loss": float(self.risk_limit.max_daily_loss),
+            "current_daily_pnl": float(self.daily_pnl),
+            "max_single_order": float(self.risk_limit.max_order_value),
+            "min_single_order": float(self.risk_limit.min_order_value)
+        }
+    
+    def update_used_capital(self, position_value: Decimal):
+        """更新已使用资金"""
+        self.used_capital = position_value 

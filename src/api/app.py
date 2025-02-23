@@ -9,11 +9,12 @@ from loguru import logger
 import sys
 
 from src.trading.client import OKXClient
-from src.trading.strategies.simple_test import SimpleTestStrategy
 from src.trading.strategies.deepseek_strategy import DeepseekStrategy
 from src.trading.core.models import init_db, TradeRecord, StrategyState, StrategyStatus
 from src.trading.core.strategy import StoppedState
+from src.trading.core.risk import RiskLimit
 from src.config import settings
+from .websocket import manager, setup_event_handlers
 
 # 配置日志
 logger.remove()  # 移除默认的日志处理器
@@ -43,21 +44,30 @@ okx_client = OKXClient()
 # 初始化数据库会话
 db_session = init_db("sqlite:///trading.db")
 
+# 初始化事件处理器
+setup_event_handlers()
+
 # 创建策略实例
-strategies = {
-    'simple_test': SimpleTestStrategy(
-        client=okx_client,
-        symbol="BTC-USDT",
-        db_session=db_session
+strategy = DeepseekStrategy(
+    client=okx_client,
+    symbol="BTC-USDT",
+    db_session=db_session,
+    risk_limit=RiskLimit(
+        total_capital=Decimal('100000'),        # 总资金10万
+        max_capital_usage=Decimal('0.8'),       # 最大使用80%
+        reserve_capital=Decimal('10000'),       # 保留1万作为准备金
+        max_position_value=Decimal('50000'),    # 最大持仓5万
+        max_leverage=3,                         # 最大杠杆3倍
+        min_margin_ratio=Decimal('0.1'),        # 最小保证金率10%
+        max_daily_loss=Decimal('1000'),         # 最大日亏损1000
+        max_order_value=Decimal('10000'),       # 单笔最大1万
+        min_order_value=Decimal('100'),         # 单笔最小100
+        price_deviation=Decimal('0.03')         # 价格偏离度3%
     ),
-    'deepseek': DeepseekStrategy(
-        client=okx_client,
-        symbol="BTC-USDT",
-        db_session=db_session,
-        quantity=Decimal('0.01'),
-        min_interval=30
-    )
-}
+    quantity=Decimal('0.01'),
+    min_interval=30,
+    commission_rate=Decimal('0.001')
+)
 
 # 全局变量
 strategy_tasks = {}
@@ -133,62 +143,24 @@ async def get_trades(symbol: str = None, limit: int = 100):
     } for trade in trades]
 
 @app.get("/api/strategy/state")
-async def get_strategy_state(symbol: str = None, strategy_type: str = None):
+async def get_strategy_state(symbol: str = None):
     """获取策略状态"""
     try:
-        if strategy_type and strategy_type in strategies:
-            # 如果指定了策略类型，直接返回该策略的状态
-            strategy = strategies[strategy_type]
-            state_info = strategy.state_info
-            # 确保状态是有效的枚举值
-            if not isinstance(state_info.get('status'), str) or state_info['status'] not in [s.value for s in StrategyStatus]:
-                state_info['status'] = StrategyStatus.STOPPED.value
-            return [state_info]
-        
-        # 否则查询数据库获取所有策略状态
-        query = db_session.query(StrategyState)
-        if symbol:
-            query = query.filter(StrategyState.symbol == symbol)
-        if strategy_type:
-            query = query.filter(StrategyState.strategy_name == strategy_type)
-        states = query.all()
-        
-        result = []
-        for state in states:
-            # 确保状态是有效的枚举值
-            status = state.status if state.status in [s.value for s in StrategyStatus] else StrategyStatus.STOPPED.value
-            result.append({
-                "strategy_name": state.strategy_name,
-                "symbol": state.symbol,
-                "position": float(state.position),
-                "avg_entry_price": float(state.avg_entry_price),
-                "unrealized_pnl": float(state.unrealized_pnl),
-                "total_pnl": float(state.total_pnl),
-                "total_commission": float(state.total_commission),
-                "status": status,
-                "last_error": state.last_error,
-                "last_run_time": state.last_run_time.isoformat() if state.last_run_time else None,
-                "updated_at": state.updated_at.isoformat()
-            })
-        return result
+        # 返回当前策略的状态
+        state_info = strategy.state_info
+        # 确保状态是有效的枚举值
+        if not isinstance(state_info.get('status'), str) or state_info['status'] not in [s.value for s in StrategyStatus]:
+            state_info['status'] = StrategyStatus.STOPPED.value
+        return [state_info]
     except Exception as e:
         app_logger.error(f"获取策略状态失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/strategy/start")
-async def start_strategy(strategy_type: str = "deepseek"):
+async def start_strategy():
     """启动策略"""
     try:
-        app_logger.info(f"收到启动策略请求: strategy_type={strategy_type}")
-        app_logger.info(f"当前可用策略: {list(strategies.keys())}")
-        
-        if strategy_type not in strategies:
-            error_msg = f"未知的策略类型: {strategy_type}"
-            app_logger.error(error_msg)
-            raise HTTPException(status_code=400, detail=error_msg)
-        
-        strategy = strategies[strategy_type]
-        app_logger.info(f"尝试启动策略 {strategy_type}, 当前状态: {strategy.current_state}")
+        app_logger.info("收到启动策略请求")
         
         # 检查策略状态
         if strategy.is_running:
@@ -198,18 +170,12 @@ async def start_strategy(strategy_type: str = "deepseek"):
         
         try:
             await strategy.start()
-            app_logger.info(f"策略 {strategy_type} start() 调用成功")
-            await strategy.on_start()
-            app_logger.info(f"策略 {strategy_type} on_start() 调用成功")
+            app_logger.info("策略启动请求已发送")
+            return {"status": "success", "message": "策略启动中"}
         except Exception as e:
-            error_msg = f"启动策略过程中出错: {str(e)}"
+            error_msg = f"启动策略失败: {str(e)}"
             app_logger.error(error_msg)
             raise HTTPException(status_code=500, detail=error_msg)
-        
-        state_info = strategy.state_info
-        app_logger.info(f"策略 {strategy_type} 启动成功，新状态: {state_info}")
-        
-        return {"status": "success", "message": "策略已启动", "state": state_info}
         
     except HTTPException:
         raise
@@ -219,26 +185,22 @@ async def start_strategy(strategy_type: str = "deepseek"):
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/api/strategy/stop")
-async def stop_strategy(strategy_type: str = "deepseek"):
+async def stop_strategy():
     """停止策略"""
     try:
-        if strategy_type not in strategies:
-            raise HTTPException(status_code=400, detail=f"未知的策略类型: {strategy_type}")
-        
-        strategy = strategies[strategy_type]
-        app_logger.info(f"尝试停止策略 {strategy_type}, 当前状态: {strategy.current_state}")
+        app_logger.info("尝试停止策略")
         
         # 检查策略状态
         if not strategy.is_running:
             raise HTTPException(status_code=400, detail="策略未在运行中")
         
         # 停止策略
-        await strategy.on_stop()
+        await strategy._on_stop()
         await strategy.stop()
         
         # 获取最新状态
         state_info = strategy.state_info
-        app_logger.info(f"策略 {strategy_type} 停止成功，新状态: {state_info['status']}")
+        app_logger.info(f"策略停止成功，新状态: {state_info['status']}")
         
         return {"status": "success", "message": "策略已停止", "state": state_info}
         
@@ -248,14 +210,10 @@ async def stop_strategy(strategy_type: str = "deepseek"):
         raise HTTPException(status_code=400, detail=error_msg)
 
 @app.post("/api/strategy/pause")
-async def pause_strategy(strategy_type: str = "deepseek"):
+async def pause_strategy():
     """暂停策略"""
     try:
-        if strategy_type not in strategies:
-            raise HTTPException(status_code=400, detail=f"未知的策略类型: {strategy_type}")
-        
-        strategy = strategies[strategy_type]
-        app_logger.info(f"尝试暂停策略 {strategy_type}, 当前状态: {strategy.current_state}")
+        app_logger.info("尝试暂停策略")
         
         # 检查策略状态
         if not strategy.is_running:
@@ -266,7 +224,7 @@ async def pause_strategy(strategy_type: str = "deepseek"):
         
         # 获取最新状态
         state_info = strategy.state_info
-        app_logger.info(f"策略 {strategy_type} 暂停成功，新状态: {state_info['status']}")
+        app_logger.info(f"策略暂停成功，新状态: {state_info['status']}")
         
         return {"status": "success", "message": "策略已暂停", "state": state_info}
         
@@ -297,11 +255,10 @@ async def clear_history():
         db_session.commit()
         
         # 重置策略实例的计数器，但不改变状态
-        for strategy in strategies.values():
-            strategy.position = Decimal('0')
-            strategy.avg_entry_price = Decimal('0')
-            strategy.total_pnl = Decimal('0')
-            strategy.total_commission = Decimal('0')
+        strategy.position = Decimal('0')
+        strategy.avg_entry_price = Decimal('0')
+        strategy.total_pnl = Decimal('0')
+        strategy.total_commission = Decimal('0')
         
         return {"status": "success", "message": "历史记录已清空"}
     except Exception as e:
@@ -309,134 +266,89 @@ async def clear_history():
         db_session.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-# WebSocket连接管理
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.logger = app_logger  # 使用带有strategy字段的日志记录器
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        self.logger.info(f"新的WebSocket连接已建立，当前连接数: {len(self.active_connections)}")
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-            self.logger.info(f"WebSocket连接已断开，当前连接数: {len(self.active_connections)}")
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        try:
-            if websocket in self.active_connections:
-                await websocket.send_text(message)
-        except Exception as e:
-            self.logger.error(f"发送消息失败: {e}")
-            self.disconnect(websocket)  # 移除await，因为disconnect不是异步函数
-
-manager = ConnectionManager()
-
 @app.websocket("/ws/market/{symbol}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
-    await manager.connect(websocket)
     try:
-        last_data = None
-        while True:  # 改为无限循环
-            if websocket not in manager.active_connections:  # 检查连接是否还活着
-                break
-                
+        await manager.connect(websocket, symbol)
+        last_market_data = None
+        
+        while True:
             try:
+                if symbol not in manager.active_connections or websocket not in manager.active_connections[symbol]:
+                    break
+                    
                 # 获取市场数据
                 market_data = okx_client.get_market_price(symbol)
-                if not market_data:  # 检查市场数据是否有效
+                if not market_data:
+                    await asyncio.sleep(1)
                     continue
                     
-                # 获取所有策略的状态
-                strategy_states = []
-                for strategy_name, strategy in strategies.items():
-                    if strategy.symbol == symbol:
-                        strategy_states.append(strategy.state_info)
-                
-                # 组合数据
-                current_data = {
-                    "market": market_data,
-                    "strategies": strategy_states
-                }
-                
-                # 只有数据变化时才推送
-                if current_data != last_data:
-                    if websocket in manager.active_connections:  # 再次检查连接是否存活
-                        await manager.send_personal_message(json.dumps(current_data), websocket)
-                        last_data = current_data
+                # 只有市场数据变化时才推送
+                if market_data != last_market_data:
+                    try:
+                        await manager.send_personal_message(
+                            json.dumps({"market": market_data}),
+                            websocket
+                        )
+                        last_market_data = market_data
+                    except Exception as e:
+                        app_logger.error(f"发送市场数据失败: {e}")
                 
                 await asyncio.sleep(1)
             except Exception as e:
                 app_logger.error(f"WebSocket处理错误: {e}")
                 if "cannot send after transport endpoint is closed" in str(e):
-                    break  # 如果连接已关闭，退出循环
-                db_session.rollback()
+                    break
                 await asyncio.sleep(1)
     except Exception as e:
         app_logger.error(f"WebSocket连接错误: {e}")
     finally:
-        manager.disconnect(websocket)
+        await manager.disconnect(websocket, symbol)
 
 @app.websocket("/ws/strategy/{symbol}")
 async def strategy_websocket_endpoint(websocket: WebSocket, symbol: str):
-    await manager.connect(websocket)
-    
-    # 初始化策略
-    strategy_type = 'deepseek'  # 假设使用 deepseek 策略
-    if strategy_type not in strategies:
-        app_logger.error(f"Unknown strategy type: {strategy_type}")
-        manager.disconnect(websocket)
-        return
-    
-    strategy = strategies[strategy_type]
-    
     try:
-        last_data = None
-        while True:  # 改为无限循环
-            if websocket not in manager.active_connections:  # 检查连接是否还活着
-                break
-                
+        await manager.connect(websocket, symbol)
+        last_market_data = None
+        last_analysis = None
+        
+        while True:
             try:
+                if symbol not in manager.active_connections or websocket not in manager.active_connections[symbol]:
+                    break
+                    
                 # 获取市场数据和策略状态
                 market_data = okx_client.get_market_price(symbol)
-                if not market_data:  # 检查市场数据是否有效
-                    continue
-                    
-                strategy_info = strategy.state_info
+                strategy_state = strategy.state_info
+                current_analysis = strategy.last_analysis
                 
-                # 获取最新的分析结果
-                analysis_data = strategy.last_analysis or {
-                    'analysis_content': '等待AI分析...',
-                    'recommendation': 'HOLD',
-                    'confidence': 0,
-                    'reasoning': '正在收集市场数据...',
-                    'error': False
+                # 构建完整的更新数据
+                update_data = {
+                    "market": market_data if market_data else {},
+                    "strategy": strategy_state,
+                    "analysis": current_analysis
                 }
                 
-                # 组合数据
-                current_data = {
-                    "market": market_data,
-                    "strategy": strategy_info,
-                    "analysis": analysis_data
-                }
-                
-                # 只有数据变化时才推送
-                if current_data != last_data:
-                    if websocket in manager.active_connections:  # 再次检查连接是否存活
-                        await manager.send_personal_message(json.dumps(current_data), websocket)
-                        last_data = current_data
+                # 检查数据是否有变化
+                if (market_data != last_market_data or 
+                    current_analysis != last_analysis):
+                    try:
+                        await manager.send_personal_message(
+                            json.dumps(update_data),
+                            websocket
+                        )
+                        last_market_data = market_data
+                        last_analysis = current_analysis
+                    except Exception as e:
+                        app_logger.error(f"发送数据失败: {e}")
                 
                 await asyncio.sleep(1)
             except Exception as e:
                 app_logger.error(f"WebSocket处理错误: {e}")
                 if "cannot send after transport endpoint is closed" in str(e):
-                    break  # 如果连接已关闭，退出循环
-                db_session.rollback()
+                    break
                 await asyncio.sleep(1)
     except Exception as e:
         app_logger.error(f"WebSocket连接错误: {e}")
     finally:
-        manager.disconnect(websocket) 
+        await manager.disconnect(websocket, symbol) 

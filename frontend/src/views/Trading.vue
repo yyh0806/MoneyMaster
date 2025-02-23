@@ -148,17 +148,23 @@
                   <el-icon class="info-icon"><InfoFilled /></el-icon>
                 </el-tooltip>
               </div>
-              <div class="analysis-section">
-                <div class="reasoning">
-                  <p>{{ analysis.reasoning || '等待AI分析...' }}</p>
+              <div class="analysis-section" v-if="hasAnalysisData">
+                <!-- 推理过程 -->
+                <div class="reasoning" v-if="analysis.reasoning">
+                  <div class="section-subtitle">推理过程</div>
+                  <div class="content-block">{{ analysis.reasoning }}</div>
                 </div>
                 
-                <div class="analysis-content" v-html="formattedAnalysis || '正在收集市场数据...'"></div>
+                <!-- 分析内容 -->
+                <div class="analysis-content" v-if="analysis.analysis">
+                  <div class="section-subtitle">分析内容</div>
+                  <div class="content-block">{{ analysis.analysis }}</div>
+                </div>
                 
                 <div class="recommendation">
                   <div class="rec-header">
                     <span class="label">交易建议:</span>
-                    <span :class="['value', recommendationClass]">{{ analysis.recommendation || 'HOLD' }}</span>
+                    <span :class="['value', recommendationClass]">{{ getRecommendationText }}</span>
                   </div>
                   <div class="confidence">
                     <span class="label">信心度:</span>
@@ -169,57 +175,108 @@
                   </div>
                 </div>
               </div>
+              <div v-else class="empty-state">
+                <p>等待AI分析结果...</p>
+              </div>
             </div>
 
-            <!-- 盈亏信息 -->
-            <div class="pnl-info">
+            <!-- 盈亏信息卡片 -->
+            <div class="info-card">
               <div class="section-title">
                 盈亏信息
-                <el-tooltip
-                  content="策略运行产生的盈亏统计信息"
-                  placement="top"
-                >
+                <el-tooltip content="策略运行产生的盈亏统计信息" placement="top">
                   <el-icon class="info-icon"><InfoFilled /></el-icon>
                 </el-tooltip>
               </div>
-              <div class="info-item">
-                <span class="label">当前持仓:</span>
-                <span class="value">{{ formatQuantity(strategyState.position) }}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">持仓均价:</span>
-                <span class="value">{{ formatPrice(strategyState.avg_entry_price) }}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">未实现盈亏:</span>
-                <el-tooltip
-                  content="未实现盈亏 = (当前市价 - 持仓均价) × 持仓数量。这是当前持仓的预计盈亏，尚未通过交易实现。"
-                  placement="top"
-                >
-                  <span class="value" :class="pnlClass(strategyState.unrealized_pnl)">
-                    {{ formatPnL(strategyState.unrealized_pnl) }}
+              <div class="info-content">
+                <div class="info-item">
+                  <span class="label">当前持仓:</span>
+                  <span class="value">{{ formatQuantity(strategyState.position_info?.盈亏信息?.当前持仓) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">持仓均价:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.持仓均价) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">持仓市值:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.持仓市值) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">未实现盈亏:</span>
+                  <span class="value" :class="pnlClass(strategyState.position_info?.盈亏信息?.未实现盈亏)">
+                    {{ formatPnL(strategyState.position_info?.盈亏信息?.未实现盈亏) }}
                   </span>
-                </el-tooltip>
-              </div>
-              <div class="info-item">
-                <span class="label">总盈亏:</span>
-                <el-tooltip
-                  content="总盈亏 = 已实现盈亏 + 未实现盈亏。绿色表示盈利，红色表示亏损。"
-                  placement="top"
-                >
-                  <span class="value" :class="pnlClass(strategyState.total_pnl)">
-                    {{ formatPnL(strategyState.total_pnl) }}
+                </div>
+                <div class="info-item">
+                  <span class="label">总盈亏:</span>
+                  <span class="value" :class="pnlClass(strategyState.position_info?.盈亏信息?.总盈亏)">
+                    {{ formatPnL(strategyState.position_info?.盈亏信息?.总盈亏) }}
                   </span>
+                </div>
+                <div class="info-item">
+                  <span class="label">总手续费:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.总手续费) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 资金信息卡片 -->
+            <div class="info-card">
+              <div class="section-title">
+                资金信息
+                <el-tooltip content="策略可用资金和使用情况" placement="top">
+                  <el-icon class="info-icon"><InfoFilled /></el-icon>
                 </el-tooltip>
               </div>
-              <div class="info-item">
-                <span class="label">总手续费:</span>
-                <el-tooltip
-                  content="所有交易产生的手续费总和"
-                  placement="top"
-                >
-                  <span class="value">{{ formatPrice(strategyState.total_commission) }}</span>
+              <div class="info-content">
+                <div class="info-item">
+                  <span class="label">总资金:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.总资金) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">已用资金:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.已用资金) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">剩余可用:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.剩余可用) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">单笔最大交易:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.单笔最大交易) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 风险信息卡片 -->
+            <div class="info-card">
+              <div class="section-title">
+                风险信息
+                <el-tooltip content="策略风险控制参数" placement="top">
+                  <el-icon class="info-icon"><InfoFilled /></el-icon>
                 </el-tooltip>
+              </div>
+              <div class="info-content">
+                <div class="info-item">
+                  <span class="label">杠杆倍数:</span>
+                  <span class="value">{{ strategyState.position_info?.风险信息?.杠杆倍数 }}x</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">最大持仓市值:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.风险信息?.最大持仓市值) }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">最大杠杆倍数:</span>
+                  <span class="value">{{ strategyState.position_info?.风险信息?.最大杠杆倍数 }}x</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">最小保证金率:</span>
+                  <span class="value">{{ (strategyState.position_info?.风险信息?.最小保证金率 * 100).toFixed(2) }}%</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">最大日亏损:</span>
+                  <span class="value">{{ formatPrice(strategyState.position_info?.风险信息?.最大日亏损) }}</span>
+                </div>
               </div>
             </div>
 
@@ -399,21 +456,28 @@ const strategyType = ref('deepseek')  // 默认使用deepseek策略
 // AI思考过程相关数据
 const analysis = ref({
   analysis: '',
-  recommendation: 'HOLD',
+  recommendation: '持有',
   confidence: 0,
-  reasoning: ''
+  reasoning: '',
+  timestamp: 0
 })
 
+// 移除不必要的计算属性
 const formattedAnalysis = computed(() => {
-  return analysis.value.analysis.split('\n').join('<br>')
+  return analysis.value.analysis
+})
+
+// 添加空值检查的计算属性
+const hasAnalysisData = computed(() => {
+  return Boolean(analysis.value.reasoning || analysis.value.analysis)
 })
 
 const recommendationClass = computed(() => {
   const rec = analysis.value.recommendation
   return {
-    'buy': rec === 'BUY',
-    'sell': rec === 'SELL',
-    'hold': rec === 'HOLD'
+    'buy': rec === '买入',
+    'sell': rec === '卖出',
+    'hold': rec === '持有'
   }
 })
 
@@ -436,6 +500,18 @@ const pnlClass = (pnl) => {
   return Number(pnl) >= 0 ? 'text-success' : 'text-danger'
 }
 
+const log = (message: string, ...args: any[]) => {
+  const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss.SSS')
+  console.log(`[${timestamp}] ${message}`, ...args)
+}
+
+// 添加性能追踪日志
+const logPerformance = (stage: string, startTime: number) => {
+  const endTime = performance.now()
+  const duration = endTime - startTime
+  log(`性能追踪 - ${stage}: ${duration.toFixed(2)}ms`)
+}
+
 // WebSocket连接
 const connectWebSocket = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -443,27 +519,34 @@ const connectWebSocket = () => {
   
   // 如果已经有连接，先关闭
   if (ws) {
-    console.log('关闭现有WebSocket连接')
+    log('关闭现有WebSocket连接')
     ws.close()
     ws = null
   }
   
-  console.log('建立新的WebSocket连接:', wsUrl)
+  log('建立新的WebSocket连接:', wsUrl)
   ws = new WebSocket(wsUrl)
   
   ws.onmessage = (event) => {
+    const receiveTime = performance.now()
+    log('收到WebSocket消息，开始处理')
+    
     try {
+      const parseStart = performance.now()
       const data = JSON.parse(event.data)
-      console.log('收到WebSocket消息:', data)
+      logPerformance('JSON解析', parseStart)
       
       // 处理市场数据
       if (data.market?.data?.[0]) {
+        const marketStart = performance.now()
         marketData.value = data.market.data[0]
+        logPerformance('市场数据更新', marketStart)
       }
       
       // 处理策略状态
       if (data.strategy) {
-        console.log('收到策略状态更新:', data.strategy)
+        const strategyStart = performance.now()
+        log('收到策略状态更新:', data.strategy)
         const oldStatus = strategyState.value?.status
         
         // 更新状态前先检查是否真的有变化
@@ -487,79 +570,57 @@ const connectWebSocket = () => {
             ElMessage.info(`策略状态变更为: ${statusMap[data.strategy.status] || data.strategy.status}`)
           }
         }
+        logPerformance('策略状态更新', strategyStart)
       }
       
       // 处理AI分析结果
       if (data.analysis) {
-        console.log('收到AI分析更新:', data.analysis)
-        try {
-          // 尝试从response_text中提取JSON
-          let analysisText = data.analysis.analysis_content || '';
-          if (analysisText.includes('{')) {
-            try {
-              const jsonStart = analysisText.indexOf('{');
-              const jsonEnd = analysisText.lastIndexOf('}') + 1;
-              const jsonStr = analysisText.substring(jsonStart, jsonEnd);
-              const jsonData = JSON.parse(jsonStr);
-              
-              // 更新分析结果
-              analysis.value = {
-                analysis: jsonData.analysis || '等待AI分析...',
-                recommendation: jsonData.recommendation || 'HOLD',
-                confidence: jsonData.confidence || 0,
-                reasoning: jsonData.reasoning || '正在收集市场数据...'
-              }
-            } catch (e) {
-              // 如果JSON解析失败，直接使用原始文本
-              analysis.value = {
-                analysis: analysisText,
-                recommendation: data.analysis.recommendation || 'HOLD',
-                confidence: data.analysis.confidence || 0,
-                reasoning: data.analysis.reasoning || '正在收集市场数据...'
-              }
-            }
-          } else {
-            // 如果没有找到JSON，直接使用原始文本
-            analysis.value = {
-              analysis: analysisText,
-              recommendation: data.analysis.recommendation || 'HOLD',
-              confidence: data.analysis.confidence || 0,
-              reasoning: data.analysis.reasoning || '正在收集市场数据...'
-            }
-          }
-        } catch (error) {
-          console.error('处理分析结果失败:', error)
+        const analysisStart = performance.now()
+        log('收到AI分析更新:', data.analysis)
+        
+        // 确保数据存在并且有效
+        if (typeof data.analysis === 'object') {
           analysis.value = {
-            analysis: '处理分析结果时出错',
-            recommendation: 'HOLD',
-            confidence: 0,
-            reasoning: '正在收集市场数据...'
+            analysis: data.analysis.analysis || '',
+            recommendation: data.analysis.recommendation || '持有',
+            confidence: data.analysis.confidence || 0,
+            reasoning: data.analysis.reasoning || '',
+            timestamp: data.analysis.timestamp || Date.now()
           }
+          
+          // 调试日志
+          log('更新后的分析数据:', analysis.value)
+        } else {
+          log('无效的分析数据格式:', data.analysis)
         }
+        
+        logPerformance('AI分析更新', analysisStart)
       }
+      
+      logPerformance('总处理时间', receiveTime)
     } catch (error) {
-      console.error('处理WebSocket消息失败:', error)
+      log('处理WebSocket消息失败:', error)
     }
   }
 
   ws.onopen = () => {
-    console.log('WebSocket连接已建立')
+    log('WebSocket连接已建立')
     // 连接成功后立即获取最新状态
     fetchStrategyState()
   }
 
   ws.onclose = (event) => {
-    console.log('WebSocket连接已关闭，code:', event.code, '原因:', event.reason)
+    log('WebSocket连接已关闭，code:', event.code, '原因:', event.reason)
     ws = null
     // 如果不是主动关闭的连接，则尝试重连
     if (event.code !== 1000) {
-      console.log('3秒后尝试重新连接...')
+      log('3秒后尝试重新连接...')
       setTimeout(connectWebSocket, 3000)
     }
   }
 
   ws.onerror = (error) => {
-    console.error('WebSocket错误:', error)
+    log('WebSocket错误:', error)
     ElMessage.error('WebSocket连接错误，正在尝试重新连接...')
     // 发生错误时重新获取状态
     fetchStrategyState()
@@ -640,12 +701,12 @@ const handleStrategyAction = async () => {
   try {
     isLoading.value = true
     const currentStatus = strategyState.value?.status || 'stopped'
-    console.log('当前策略状态:', currentStatus)
+    log('当前策略状态:', currentStatus)
     
     // 根据当前状态决定操作
     const action = currentStatus === 'running' ? 'stop' : 'start'
     
-    console.log(`执行策略${action}操作`)
+    log(`执行策略${action}操作`)
     await axios.post(`${API_BASE_URL}/api/strategy/${action}`, {
       strategy_type: strategyType.value,
       symbol: symbol.value
@@ -655,7 +716,7 @@ const handleStrategyAction = async () => {
     await fetchStrategyState()
     
   } catch (error) {
-    console.error('策略操作失败:', error)
+    log('策略操作失败:', error)
     const errorMessage = error.response?.data?.detail || `策略操作失败`
     ElMessage.error(errorMessage)
     
@@ -669,7 +730,7 @@ const handleStrategyAction = async () => {
 const handlePause = async () => {
   try {
     isLoading.value = true
-    console.log('执行策略暂停操作')
+    log('执行策略暂停操作')
     await axios.post(`${API_BASE_URL}/api/strategy/pause`, {
       strategy_type: strategyType.value,
       symbol: symbol.value
@@ -679,7 +740,7 @@ const handlePause = async () => {
     await fetchStrategyState()
     
   } catch (error) {
-    console.error('策略暂停失败:', error)
+    log('策略暂停失败:', error)
     ElMessage.error(error.response?.data?.detail || '策略暂停失败')
     await fetchStrategyState()
   } finally {
@@ -690,7 +751,7 @@ const handlePause = async () => {
 // 获取策略状态
 const fetchStrategyState = async () => {
   try {
-    console.log('获取策略状态, 参数:', {
+    log('获取策略状态, 参数:', {
       symbol: symbol.value,
       strategy_type: strategyType.value
     })
@@ -699,14 +760,14 @@ const fetchStrategyState = async () => {
       `${API_BASE_URL}/api/strategy/state?symbol=${symbol.value}&strategy_type=${strategyType.value}`
     )
     
-    console.log('获取策略状态响应:', response.data)
+    log('获取策略状态响应:', response.data)
     
     if (response.data && response.data.length > 0) {
       const newState = response.data[0]
       
       // 验证状态的有效性
       if (!['running', 'stopped', 'paused', 'error'].includes(newState.status)) {
-        console.error('无效的策略状态:', newState.status)
+        log('无效的策略状态:', newState.status)
         ElMessage.error('收到无效的策略状态')
         return
       }
@@ -714,16 +775,16 @@ const fetchStrategyState = async () => {
       // 检查状态变化
       const oldStatus = strategyState.value?.status
       if (oldStatus && oldStatus !== newState.status) {
-        console.log('策略状态发生变化:', {
+        log('策略状态发生变化:', {
           from: oldStatus,
           to: newState.status
         })
       }
       
       strategyState.value = newState
-      console.log('更新策略状态:', strategyState.value)
+      log('更新策略状态:', strategyState.value)
     } else {
-      console.warn('没有找到策略状态，使用默认值')
+      log('没有找到策略状态，使用默认值')
       strategyState.value = {
         status: 'stopped',
         position: 0,
@@ -734,7 +795,7 @@ const fetchStrategyState = async () => {
       }
     }
   } catch (error) {
-    console.error('获取策略状态失败:', error)
+    log('获取策略状态失败:', error)
     ElMessage.error('获取策略状态失败')
     
     // 如果获取状态失败，不要清空现有状态
@@ -756,9 +817,9 @@ const fetchStrategyState = async () => {
 const formatKlineData = (data) => {
   return data.map(item => {
     // OKX的K线数据格式：[timestamp, open, high, low, close, volume, ...]
-    console.log('原始数据项:', item)
+    log('原始数据项:', item)
     const [timestamp, open, high, low, close, volume] = item
-    console.log('解析后的原始数据:', {
+    log('解析后的原始数据:', {
       timestamp: dayjs(parseInt(timestamp)).format('YYYY-MM-DD HH:mm:ss'),
       open: Number(open),
       high: Number(high),
@@ -779,10 +840,10 @@ const formatKlineData = (data) => {
     
     // 验证价格的合理性
     if (formattedData.high < formattedData.close || formattedData.high < formattedData.open) {
-      console.error('数据异常: 最高价低于开盘价或收盘价', formattedData)
+      log('数据异常: 最高价低于开盘价或收盘价', formattedData)
     }
     if (formattedData.low > formattedData.close || formattedData.low > formattedData.open) {
-      console.error('数据异常: 最低价高于开盘价或收盘价', formattedData)
+      log('数据异常: 最低价高于开盘价或收盘价', formattedData)
     }
     
     return formattedData
@@ -811,7 +872,7 @@ const updateChart = (klineData) => {
       item.low,     // 最低价
       item.high     // 最高价
     ]
-    console.log('K线数据转换:', {
+    log('K线数据转换:', {
       from: item,
       to: data
     })
@@ -844,10 +905,10 @@ const updateChart = (klineData) => {
             成交量: ${Number(volumeData.value).toFixed(4)}
           `
         } else if (candleData) {
-          console.log('Tooltip原始数据:', candleData.data)
+          log('Tooltip原始数据:', candleData.data)
           // OKX的K线数据格式：[timestamp, open, high, low, close, volume]
           const [timestamp, open, high, low, close] = candleData.data
-          console.log('Tooltip解析后的数据:', {
+          log('Tooltip解析后的数据:', {
             time: params[0].axisValue,
             open,
             high,
@@ -1071,7 +1132,7 @@ const handleClearHistory = async () => {
     }
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('清空历史记录失败:', error)
+      log('清空历史记录失败:', error)
       ElMessage.error(error.response?.data?.detail || '清空历史记录失败')
     }
   } finally {
@@ -1113,7 +1174,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (ws) {
-    console.log('组件卸载，关闭WebSocket连接')
+    log('组件卸载，关闭WebSocket连接')
     ws.close(1000, 'Component unmounted')
     ws = null
   }
@@ -1132,6 +1193,15 @@ let refreshInterval = setInterval(() => {
   fetchAccountBalance()
   fetchKlineData()
 }, 60000)
+
+const getRecommendationText = computed(() => {
+  const recommendationMap = {
+    '买入': '买入',
+    '卖出': '卖出',
+    '持有': '观望'
+  }
+  return recommendationMap[analysis.value.recommendation] || '观望'
+})
 </script>
 
 <style scoped>
@@ -1309,18 +1379,32 @@ let refreshInterval = setInterval(() => {
 
 .thinking-process {
   margin-top: 20px;
+  background: #18181b;
+  border-radius: 8px;
+  padding: 20px;
+  min-height: 300px;
 }
 
 .analysis-section {
-  background: transparent;
-  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
+.reasoning,
 .analysis-content {
-  margin: 10px 0;
-  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.reasoning p,
+.analysis-content p {
+  margin: 0;
+  padding: 12px;
+  background: #262626;
+  border-radius: 6px;
   color: #E5E7EB;
   font-size: 14px;
+  line-height: 1.6;
 }
 
 .recommendation {
@@ -1376,20 +1460,6 @@ let refreshInterval = setInterval(() => {
   color: #909399;
 }
 
-.reasoning {
-  margin-top: 15px;
-  color: #E5E7EB;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.reasoning p {
-  margin: 0;
-  padding: 10px;
-  background: #18181b;
-  border-radius: 6px;
-}
-
 .strategy-info {
   display: flex;
   flex-direction: column;
@@ -1404,70 +1474,54 @@ let refreshInterval = setInterval(() => {
   padding: 15px;
 }
 
-.section-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #E5E7EB;
-  margin-bottom: 15px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #262626;
-}
-
-.reasoning {
-  margin-bottom: 20px;
-}
-
-.reasoning p {
-  margin: 0;
-  padding: 15px;
-  background: #262626;
-  border-radius: 6px;
-  color: #E5E7EB;
+.section-subtitle {
   font-size: 14px;
-  line-height: 1.6;
+  font-weight: 500;
+  color: #e5e7eb;
+  margin: 15px 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #2d2d33;
 }
 
-.analysis-content {
-  margin: 15px 0;
+.content-block {
   padding: 15px;
-  background: #262626;
+  background: #1f1f23;
   border-radius: 6px;
-  color: #E5E7EB;
+  color: #e5e7eb;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.8;
+  margin-top: 8px;
+  white-space: pre-wrap;
+  min-height: 80px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #2d2d33;
 }
 
-.recommendation {
-  margin-top: 15px;
-  padding: 15px;
-  background: #262626;
-  border-radius: 6px;
+.content-block::-webkit-scrollbar {
+  width: 6px;
 }
 
-.placeholder-text {
-  color: #909399;
-  text-align: center;
-  padding: 20px;
-  font-style: italic;
+.content-block::-webkit-scrollbar-track {
+  background: #18181b;
+  border-radius: 3px;
 }
 
-.strategy-title {
+.content-block::-webkit-scrollbar-thumb {
+  background: #4a4a4a;
+  border-radius: 3px;
+}
+
+.content-block::-webkit-scrollbar-thumb:hover {
+  background: #5a5a5a;
+}
+
+.empty-state {
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 8px;
-}
-
-.info-icon {
-  font-size: 16px;
+  height: 200px;
   color: #909399;
-  cursor: help;
-}
-
-.strategy-status {
-  height: 100%;
-  .el-card__body {
-    height: calc(100% - 60px);
-    overflow-y: auto;
-  }
+  font-size: 14px;
 }
 </style> 
