@@ -102,8 +102,8 @@
     <!-- 策略状态卡片行 -->
     <el-row :gutter="20">
       <!-- 杨二狗策略 -->
-      <el-col :span="6">
-        <el-card class="strategy-status">
+      <el-col :span="24">
+        <el-card class="strategy-status" :body-style="{ padding: '20px' }">
           <template #header>
             <div class="card-header">
               <div class="strategy-title">
@@ -137,229 +137,191 @@
             </div>
           </template>
           <div class="strategy-info">
-            <!-- 思考过程 -->
-            <div class="thinking-process">
-              <div class="section-title">
-                思考过程
-                <el-tooltip
-                  content="AI模型分析市场数据并做出交易决策的详细过程"
-                  placement="top"
-                >
-                  <el-icon class="info-icon"><InfoFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="analysis-section" v-if="hasAnalysisData">
-                <!-- 推理过程 -->
-                <div class="reasoning" v-if="analysis.reasoning">
-                  <div class="section-subtitle">推理过程</div>
-                  <div class="content-block">{{ analysis.reasoning }}</div>
-                </div>
-                
-                <!-- 分析内容 -->
-                <div class="analysis-content" v-if="analysis.analysis">
-                  <div class="section-subtitle">分析内容</div>
-                  <div class="content-block">{{ analysis.analysis }}</div>
-                </div>
-                
-                <div class="recommendation">
-                  <div class="rec-header">
-                    <span class="label">交易建议:</span>
-                    <span :class="['value', recommendationClass]">{{ getRecommendationText }}</span>
+            <el-row :gutter="20">
+              <el-col :span="8">
+                <!-- 思考过程 -->
+                <div class="thinking-process">
+                  <div class="section-title">
+                    思考过程
+                    <el-tooltip
+                      content="AI模型分析市场数据并做出交易决策的详细过程"
+                      placement="top"
+                    >
+                      <el-icon class="info-icon"><InfoFilled /></el-icon>
+                    </el-tooltip>
                   </div>
-                  <div class="confidence">
-                    <span class="label">信心度:</span>
-                    <div class="confidence-bar">
-                      <div :style="{ width: `${analysis.confidence * 100}%` }" class="confidence-fill"></div>
+                  <div class="analysis-section" v-if="hasAnalysisData">
+                    <!-- 推理过程 -->
+                    <div class="reasoning" v-if="analysis.reasoning">
+                      <div class="section-subtitle">推理过程</div>
+                      <div class="content-block">{{ analysis.reasoning }}</div>
                     </div>
-                    <span class="confidence-value">{{ ((analysis.confidence || 0) * 100).toFixed(1) }}%</span>
+                    
+                    <!-- 分析内容 -->
+                    <div class="analysis-content" v-if="analysis.analysis">
+                      <div class="section-subtitle">分析内容</div>
+                      <div class="content-block">{{ analysis.analysis }}</div>
+                    </div>
+                    
+                    <div class="recommendation">
+                      <div class="rec-header">
+                        <span class="label">交易建议:</span>
+                        <span :class="['value', 'recommendation-text', recommendationClass]">{{ getRecommendationText }}</span>
+                      </div>
+                      <div class="confidence">
+                        <span class="label">信心度:</span>
+                        <div class="confidence-bar">
+                          <div :style="{ width: `${analysis.confidence * 100}%` }" class="confidence-fill"></div>
+                        </div>
+                        <span class="confidence-value">{{ ((analysis.confidence || 0) * 100).toFixed(1) }}%</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="empty-state">
+                    <p>等待AI分析结果...</p>
                   </div>
                 </div>
-              </div>
-              <div v-else class="empty-state">
-                <p>等待AI分析结果...</p>
-              </div>
-            </div>
+              </el-col>
 
-            <!-- 盈亏信息卡片 -->
-            <div class="info-card">
-              <div class="section-title">
-                盈亏信息
-                <el-tooltip content="策略运行产生的盈亏统计信息" placement="top">
-                  <el-icon class="info-icon"><InfoFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="info-content">
-                <div class="info-item">
-                  <span class="label">当前持仓:</span>
-                  <span class="value">{{ formatQuantity(strategyState.position_info?.盈亏信息?.当前持仓) }}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">持仓均价:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.持仓均价) }}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">持仓市值:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.持仓市值) }}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">未实现盈亏:</span>
-                  <span class="value" :class="pnlClass(strategyState.position_info?.盈亏信息?.未实现盈亏)">
-                    {{ formatPnL(strategyState.position_info?.盈亏信息?.未实现盈亏) }}
-                  </span>
-                </div>
-                <div class="info-item">
-                  <span class="label">总盈亏:</span>
-                  <span class="value" :class="pnlClass(strategyState.position_info?.盈亏信息?.总盈亏)">
-                    {{ formatPnL(strategyState.position_info?.盈亏信息?.总盈亏) }}
-                  </span>
-                </div>
-                <div class="info-item">
-                  <span class="label">总手续费:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.总手续费) }}</span>
-                </div>
-              </div>
-            </div>
+              <el-col :span="16">
+                <el-row :gutter="20">
+                  <!-- 盈亏信息卡片 -->
+                  <el-col :span="4">
+                    <div class="status-info">
+                      <div class="section-title">
+                        盈亏信息
+                        <el-tooltip content="策略运行产生的盈亏统计信息" placement="top">
+                          <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                      </div>
+                      <div class="info-content">
+                        <div class="info-item">
+                          <span class="label">当前持仓:</span>
+                          <span class="value">{{ formatQuantity(strategyState.position_info?.盈亏信息?.当前持仓) }}</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">持仓均价:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.持仓均价) }}</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">持仓市值:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.持仓市值) }}</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">未实现盈亏:</span>
+                          <span class="value" :class="pnlClass(strategyState.position_info?.盈亏信息?.未实现盈亏)">
+                            {{ formatPnL(strategyState.position_info?.盈亏信息?.未实现盈亏) }}
+                          </span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">总盈亏:</span>
+                          <span class="value" :class="pnlClass(strategyState.position_info?.盈亏信息?.总盈亏)">
+                            {{ formatPnL(strategyState.position_info?.盈亏信息?.总盈亏) }}
+                          </span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">总手续费:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.盈亏信息?.总手续费) }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </el-col>
 
-            <!-- 资金信息卡片 -->
-            <div class="info-card">
-              <div class="section-title">
-                资金信息
-                <el-tooltip content="策略可用资金和使用情况" placement="top">
-                  <el-icon class="info-icon"><InfoFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="info-content">
-                <div class="info-item">
-                  <span class="label">总资金:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.总资金) }}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">已用资金:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.已用资金) }}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">剩余可用:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.剩余可用) }}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">单笔最大交易:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.单笔最大交易) }}</span>
-                </div>
-              </div>
-            </div>
+                  <!-- 资金信息卡片 -->
+                  <el-col :span="4">
+                    <div class="status-info">
+                      <div class="section-title">
+                        资金信息
+                        <el-tooltip content="策略可用资金和使用情况" placement="top">
+                          <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                      </div>
+                      <div class="info-content">
+                        <div class="info-item">
+                          <span class="label">总资金:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.总资金) }}</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">已用资金:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.已用资金) }}</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">剩余可用:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.剩余可用) }}</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">单笔最大交易:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.资金信息?.单笔最大交易) }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </el-col>
 
-            <!-- 风险信息卡片 -->
-            <div class="info-card">
-              <div class="section-title">
-                风险信息
-                <el-tooltip content="策略风险控制参数" placement="top">
-                  <el-icon class="info-icon"><InfoFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="info-content">
-                <div class="info-item">
-                  <span class="label">杠杆倍数:</span>
-                  <span class="value">{{ strategyState.position_info?.风险信息?.杠杆倍数 }}x</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">最大持仓市值:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.风险信息?.最大持仓市值) }}</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">最大杠杆倍数:</span>
-                  <span class="value">{{ strategyState.position_info?.风险信息?.最大杠杆倍数 }}x</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">最小保证金率:</span>
-                  <span class="value">{{ (strategyState.position_info?.风险信息?.最小保证金率 * 100).toFixed(2) }}%</span>
-                </div>
-                <div class="info-item">
-                  <span class="label">最大日亏损:</span>
-                  <span class="value">{{ formatPrice(strategyState.position_info?.风险信息?.最大日亏损) }}</span>
-                </div>
-              </div>
-            </div>
+                  <!-- 风险信息卡片 -->
+                  <el-col :span="4">
+                    <div class="status-info">
+                      <div class="section-title">
+                        风险信息
+                        <el-tooltip content="策略风险控制参数" placement="top">
+                          <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                      </div>
+                      <div class="info-content">
+                        <div class="info-item">
+                          <span class="label">杠杆倍数:</span>
+                          <span class="value">{{ strategyState.position_info?.风险信息?.杠杆倍数 }}x</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">最大持仓市值:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.风险信息?.最大持仓市值) }}</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">最大杠杆倍数:</span>
+                          <span class="value">{{ strategyState.position_info?.风险信息?.最大杠杆倍数 }}x</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">最小保证金率:</span>
+                          <span class="value">{{ (strategyState.position_info?.风险信息?.最小保证金率 * 100).toFixed(2) }}%</span>
+                        </div>
+                        <div class="info-item">
+                          <span class="label">最大日亏损:</span>
+                          <span class="value">{{ formatPrice(strategyState.position_info?.风险信息?.最大日亏损) }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </el-col>
 
-            <!-- 状态信息 -->
-            <div class="status-info">
-              <div class="section-title">
-                状态信息
-                <el-tooltip
-                  content="策略运行状态和系统信息"
-                  placement="top"
-                >
-                  <el-icon class="info-icon"><InfoFilled /></el-icon>
-                </el-tooltip>
-              </div>
-              <div class="info-item">
-                <span class="label">状态:</span>
-                <el-tag :type="getStatusTagType">
-                  {{ getStatusText }}
-                </el-tag>
-              </div>
-              <div class="info-item" v-if="strategyState.last_error">
-                <span class="label">错误信息:</span>
-                <span class="value text-danger">{{ strategyState.last_error }}</span>
-              </div>
-              <div class="info-item">
-                <span class="label">最后运行时间:</span>
-                <span class="value">{{ formatLastRunTime }}</span>
-              </div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 策略2（占位） -->
-      <el-col :span="6">
-        <el-card class="strategy-status">
-          <template #header>
-            <div class="card-header">
-              <span>策略2</span>
-              <div class="strategy-controls">
-                <el-button type="success" size="small" disabled>启动策略</el-button>
-              </div>
-            </div>
-          </template>
-          <div class="strategy-info">
-            <div class="section-title">开发中</div>
-            <p class="placeholder-text">该策略正在开发中...</p>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 策略3（占位） -->
-      <el-col :span="6">
-        <el-card class="strategy-status">
-          <template #header>
-            <div class="card-header">
-              <span>策略3</span>
-              <div class="strategy-controls">
-                <el-button type="success" size="small" disabled>启动策略</el-button>
-              </div>
-            </div>
-          </template>
-          <div class="strategy-info">
-            <div class="section-title">开发中</div>
-            <p class="placeholder-text">该策略正在开发中...</p>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 策略4（占位） -->
-      <el-col :span="6">
-        <el-card class="strategy-status">
-          <template #header>
-            <div class="card-header">
-              <span>策略4</span>
-              <div class="strategy-controls">
-                <el-button type="success" size="small" disabled>启动策略</el-button>
-              </div>
-            </div>
-          </template>
-          <div class="strategy-info">
-            <div class="section-title">开发中</div>
-            <p class="placeholder-text">该策略正在开发中...</p>
+                  <!-- 状态信息 -->
+                  <el-col :span="4">
+                    <div class="status-info">
+                      <div class="section-title">
+                        状态信息
+                        <el-tooltip
+                          content="策略运行状态和系统信息"
+                          placement="top"
+                        >
+                          <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                      </div>
+                      <div class="info-item">
+                        <span class="label">状态:</span>
+                        <el-tag :type="getStatusTagType">
+                          {{ getStatusText }}
+                        </el-tag>
+                      </div>
+                      <div class="info-item" v-if="strategyState.last_error">
+                        <span class="label">错误信息:</span>
+                        <span class="value text-danger">{{ strategyState.last_error }}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="label">最后运行时间:</span>
+                        <span class="value">{{ formatLastRunTime }}</span>
+                      </div>
+                    </div>
+                  </el-col>
+                </el-row>
+              </el-col>
+            </el-row>
           </div>
         </el-card>
       </el-col>
@@ -1388,7 +1350,7 @@ const getRecommendationText = computed(() => {
 .analysis-section {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 10px;
 }
 
 .reasoning,
@@ -1523,5 +1485,141 @@ const getRecommendationText = computed(() => {
   height: 200px;
   color: #909399;
   font-size: 14px;
+}
+
+.strategy-status {
+  background-color: #141414;
+  border: 1px solid #262626;
+  
+  .el-card__header {
+    background-color: #18181b;
+    border-bottom: 1px solid #262626;
+    padding: 15px 20px;
+  }
+  
+  .strategy-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 500;
+    color: #e5e7eb;
+    
+    .info-icon {
+      color: #60a5fa;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  }
+}
+
+.status-info {
+  background: #18181b;
+  border-radius: 8px;
+  padding: 15px;
+  border: 1px solid #262626;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #e5e7eb;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #262626;
+    
+    .info-icon {
+      color: #60a5fa;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  }
+
+  .info-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .info-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #262626;
+      
+      &:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+      
+      .label {
+        color: #9ca3af;
+        font-size: 14px;
+      }
+      
+      .value {
+        color: #e5e7eb;
+        font-size: 14px;
+        font-weight: 500;
+      }
+    }
+  }
+}
+
+/* 移除旧的样式 */
+.info-card {
+  display: none;
+}
+
+/* 调整列间距 */
+.el-row {
+  .el-col-4 {
+    padding: 0 10px;
+  }
+}
+
+/* 确保所有卡片高度一致 */
+.el-col-4 {
+  height: 100%;
+  
+  .status-info {
+    height: 100%;
+  }
+}
+
+.text-success { color: #67C23A; }
+.text-danger { color: #F56C6C; }
+
+.analysis-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recommendation {
+  .rec-header {
+    .recommendation-text {
+      font-size: 28px;
+    }
+  }
+}
+
+.info-card, .status-info {
+  height: 100%;
+  margin-bottom: 0;
+}
+
+.section-subtitle {
+  margin-bottom: 5px;
+}
+
+.content-block {
+  margin-top: 5px;
 }
 </style> 
