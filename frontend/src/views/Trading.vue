@@ -138,8 +138,8 @@
           </template>
           <div class="strategy-info">
             <el-row :gutter="20">
-              <el-col :span="8">
-                <!-- 思考过程 -->
+              <!-- 左侧面板：思考过程 -->
+              <el-col :span="6">
                 <div class="thinking-process">
                   <div class="section-title">
                     思考过程
@@ -183,10 +183,12 @@
                 </div>
               </el-col>
 
-              <el-col :span="16">
-                <el-row :gutter="20">
+              <!-- 右侧面板：状态和交易记录 -->
+              <el-col :span="18">
+                <!-- 状态信息行 -->
+                <el-row :gutter="16" class="status-row">
                   <!-- 盈亏信息卡片 -->
-                  <el-col :span="4">
+                  <el-col :span="6">
                     <div class="status-info">
                       <div class="section-title">
                         盈亏信息
@@ -228,7 +230,7 @@
                   </el-col>
 
                   <!-- 资金信息卡片 -->
-                  <el-col :span="4">
+                  <el-col :span="6">
                     <div class="status-info">
                       <div class="section-title">
                         资金信息
@@ -258,7 +260,7 @@
                   </el-col>
 
                   <!-- 风险信息卡片 -->
-                  <el-col :span="4">
+                  <el-col :span="6">
                     <div class="status-info">
                       <div class="section-title">
                         风险信息
@@ -292,7 +294,7 @@
                   </el-col>
 
                   <!-- 状态信息 -->
-                  <el-col :span="4">
+                  <el-col :span="6">
                     <div class="status-info">
                       <div class="section-title">
                         状态信息
@@ -320,67 +322,84 @@
                     </div>
                   </el-col>
                 </el-row>
+
+                <!-- 交易记录表格 -->
+                <el-row class="trade-records-row">
+                  <el-col :span="24">
+                    <div class="trade-records">
+                      <div class="section-header">
+                        <div class="title-area">
+                          <span class="section-title">交易记录</span>
+                          <el-tooltip content="策略的历史交易记录" placement="top">
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                          </el-tooltip>
+                        </div>
+                        <div class="actions-area">
+                          <el-button
+                            type="danger"
+                            size="small"
+                            @click="handleClearHistory"
+                            :loading="isClearing"
+                          >
+                            清空历史
+                          </el-button>
+                        </div>
+                      </div>
+                      <div class="table-container">
+                        <el-table 
+                          :data="tradeHistory" 
+                          style="width: 100%" 
+                          height="350"
+                          :header-cell-style="{
+                            background: '#1a1a1a',
+                            color: '#e5e7eb',
+                            borderColor: '#262626'
+                          }"
+                          :cell-style="{
+                            borderColor: '#262626'
+                          }"
+                        >
+                          <el-table-column prop="trade_time" label="时间" min-width="180" align="center">
+                            <template #default="scope">
+                              {{ formatDateTime(scope.row.trade_time) }}
+                            </template>
+                          </el-table-column>
+                          <el-table-column prop="side" label="方向" width="100" align="center">
+                            <template #default="scope">
+                              <el-tag :type="scope.row.side === 'BUY' ? 'success' : 'danger'">
+                                {{ scope.row.side === 'BUY' ? '买入' : '卖出' }}
+                              </el-tag>
+                            </template>
+                          </el-table-column>
+                          <el-table-column prop="price" label="价格" width="120" align="right">
+                            <template #default="scope">
+                              {{ formatPrice(scope.row.price) }}
+                            </template>
+                          </el-table-column>
+                          <el-table-column prop="quantity" label="数量" width="120" align="right">
+                            <template #default="scope">
+                              {{ formatQuantity(scope.row.quantity) }}
+                            </template>
+                          </el-table-column>
+                          <el-table-column prop="commission" label="手续费" width="100" align="right">
+                            <template #default="scope">
+                              {{ formatPrice(scope.row.commission) }}
+                            </template>
+                          </el-table-column>
+                          <el-table-column prop="realized_pnl" label="实现盈亏" width="120" align="right">
+                            <template #default="scope">
+                              <span :class="pnlClass(scope.row.realized_pnl)">
+                                {{ scope.row.realized_pnl === 0 ? '-' : formatPnL(scope.row.realized_pnl) }}
+                              </span>
+                            </template>
+                          </el-table-column>
+                        </el-table>
+                      </div>
+                    </div>
+                  </el-col>
+                </el-row>
               </el-col>
             </el-row>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 交易记录表格 -->
-    <el-row>
-      <el-col :span="24">
-        <el-card class="trade-history">
-          <template #header>
-            <div class="card-header">
-              <span>交易记录</span>
-              <el-button
-                type="danger"
-                size="small"
-                @click="handleClearHistory"
-                :loading="isClearing"
-              >
-                清空历史
-              </el-button>
-            </div>
-          </template>
-          <div class="table-container">
-            <el-table :data="tradeHistory" style="width: 100%" height="400">
-              <el-table-column prop="trade_time" label="时间" min-width="200" align="center">
-                <template #default="scope">
-                  {{ formatDateTime(scope.row.trade_time) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="side" label="方向" width="100" align="center">
-                <template #default="scope">
-                  <el-tag :type="scope.row.side === 'BUY' ? 'success' : 'danger'">
-                    {{ scope.row.side === 'BUY' ? '买入' : '卖出' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="price" label="价格" width="140" align="right">
-                <template #default="scope">
-                  {{ formatPrice(scope.row.price) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="quantity" label="数量" width="140" align="right">
-                <template #default="scope">
-                  {{ formatQuantity(scope.row.quantity) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="commission" label="手续费" width="120" align="right">
-                <template #default="scope">
-                  {{ formatPrice(scope.row.commission) }}
-                </template>
-              </el-table-column>
-              <el-table-column prop="realized_pnl" label="实现盈亏" width="140" align="right">
-                <template #default="scope">
-                  <span :class="pnlClass(scope.row.realized_pnl)">
-                    {{ scope.row.realized_pnl === 0 ? '-' : formatPnL(scope.row.realized_pnl) }}
-                  </span>
-                </template>
-              </el-table-column>
-            </el-table>
           </div>
         </el-card>
       </el-col>
@@ -1331,20 +1350,62 @@ const getRecommendationText = computed(() => {
 }
 
 .section-title {
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
   font-weight: 600;
-  color: #909399;
-  margin: 15px 0 10px;
-  padding-bottom: 8px;
+  color: #e5e7eb;
+  margin-bottom: 15px;
+  padding-bottom: 12px;
   border-bottom: 1px solid #262626;
+
+  .info-icon {
+    font-size: 16px;
+    color: #60a5fa;
+    cursor: pointer;
+  }
 }
 
 .thinking-process {
-  margin-top: 20px;
+  height: 100%;
+  margin: 0;
   background: #18181b;
   border-radius: 8px;
   padding: 20px;
-  min-height: 300px;
+  border: 1px solid #262626;
+  display: flex;
+  flex-direction: column;
+
+  .analysis-section {
+    flex: 1;
+    overflow-y: auto;
+    
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: #18181b;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background: #4a4a4a;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb:hover {
+      background: #5a5a5a;
+    }
+  }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 .analysis-section {
@@ -1423,21 +1484,170 @@ const getRecommendationText = computed(() => {
 }
 
 .strategy-info {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  padding: 10px;
+  height: 100%;
+
+  .el-row {
+    height: 100%;
+  }
+
+  .el-col {
+    height: 100%;
+  }
 }
 
-.thinking-process,
-.pnl-info,
+.status-row {
+  margin-bottom: 20px;
+  height: 220px;  /* 固定状态信息行的高度 */
+}
+
+.trade-records-row {
+  margin-top: 0;
+  height: calc(100% - 240px);  /* 减去状态行高度和间距 */
+}
+
+.thinking-process {
+  height: 100%;
+  margin: 0;
+  background: #18181b;
+  border-radius: 8px;
+  padding: 20px;
+  border: 1px solid #262626;
+  display: flex;
+  flex-direction: column;
+
+  .analysis-section {
+    flex: 1;
+    overflow-y: auto;
+    
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: #18181b;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background: #4a4a4a;
+      border-radius: 3px;
+    }
+    
+    &::-webkit-scrollbar-thumb:hover {
+      background: #5a5a5a;
+    }
+  }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
 .status-info {
   background: #18181b;
   border-radius: 8px;
   padding: 15px;
+  border: 1px solid #262626;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  .info-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+}
+
+.trade-records {
+  background: #18181b;
+  border-radius: 8px;
+  padding: 15px;  /* 减小整体内边距 */
+  border: 1px solid #262626;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #262626;
+
+    .title-area {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .section-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #e5e7eb;
+        margin: 0;
+        padding: 0;
+        border: none;
+      }
+
+      .info-icon {
+        font-size: 16px;
+        color: #60a5fa;
+        cursor: pointer;
+      }
+    }
+  }
+
+  .table-container {
+    flex: 1;
+    background: #1f1f23;
+    border-radius: 8px;
+    padding: 12px;  /* 减小表格容器的内边距 */
+    border: 1px solid #262626;
+    overflow: hidden;
+
+    :deep(.el-table) {
+      height: 100%;
+      background-color: transparent;
+      border: none;
+      
+      &::before {
+        display: none;
+      }
+      
+      th {
+        background-color: #1a1a1a;
+        border-bottom: 1px solid #262626;
+        padding: 8px;  /* 减小表头单元格的内边距 */
+        font-weight: 500;
+        font-size: 13px;  /* 稍微减小表头文字大小 */
+      }
+      
+      td {
+        background-color: transparent;
+        border-bottom: 1px solid #262626;
+        padding: 6px 8px;  /* 减小表格单元格的内边距 */
+        font-size: 13px;  /* 稍微减小单元格文字大小 */
+      }
+      
+      tr {
+        background-color: transparent;
+        
+        &:hover > td {
+          background-color: #262626;
+        }
+      }
+    }
+  }
 }
 
 .section-subtitle {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: #e5e7eb;
   margin: 15px 0 8px;
@@ -1445,181 +1655,8 @@ const getRecommendationText = computed(() => {
   border-bottom: 1px solid #2d2d33;
 }
 
-.content-block {
-  padding: 15px;
-  background: #1f1f23;
-  border-radius: 6px;
-  color: #e5e7eb;
-  font-size: 14px;
-  line-height: 1.8;
-  margin-top: 8px;
-  white-space: pre-wrap;
-  min-height: 80px;
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid #2d2d33;
-}
-
-.content-block::-webkit-scrollbar {
-  width: 6px;
-}
-
-.content-block::-webkit-scrollbar-track {
-  background: #18181b;
-  border-radius: 3px;
-}
-
-.content-block::-webkit-scrollbar-thumb {
-  background: #4a4a4a;
-  border-radius: 3px;
-}
-
-.content-block::-webkit-scrollbar-thumb:hover {
-  background: #5a5a5a;
-}
-
-.empty-state {
+.actions-area {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 200px;
-  color: #909399;
-  font-size: 14px;
-}
-
-.strategy-status {
-  background-color: #141414;
-  border: 1px solid #262626;
-  
-  .el-card__header {
-    background-color: #18181b;
-    border-bottom: 1px solid #262626;
-    padding: 15px 20px;
-  }
-  
-  .strategy-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 16px;
-    font-weight: 500;
-    color: #e5e7eb;
-    
-    .info-icon {
-      color: #60a5fa;
-      font-size: 16px;
-      cursor: pointer;
-    }
-  }
-}
-
-.status-info {
-  background: #18181b;
-  border-radius: 8px;
-  padding: 15px;
-  border: 1px solid #262626;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-
-  .section-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    color: #e5e7eb;
-    margin-bottom: 15px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #262626;
-    
-    .info-icon {
-      color: #60a5fa;
-      font-size: 16px;
-      cursor: pointer;
-    }
-  }
-
-  .info-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-
-    .info-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid #262626;
-      
-      &:last-child {
-        border-bottom: none;
-        padding-bottom: 0;
-      }
-      
-      .label {
-        color: #9ca3af;
-        font-size: 14px;
-      }
-      
-      .value {
-        color: #e5e7eb;
-        font-size: 14px;
-        font-weight: 500;
-      }
-    }
-  }
-}
-
-/* 移除旧的样式 */
-.info-card {
-  display: none;
-}
-
-/* 调整列间距 */
-.el-row {
-  .el-col-4 {
-    padding: 0 10px;
-  }
-}
-
-/* 确保所有卡片高度一致 */
-.el-col-4 {
-  height: 100%;
-  
-  .status-info {
-    height: 100%;
-  }
-}
-
-.text-success { color: #67C23A; }
-.text-danger { color: #F56C6C; }
-
-.analysis-section {
-  display: flex;
-  flex-direction: column;
   gap: 10px;
-}
-
-.recommendation {
-  .rec-header {
-    .recommendation-text {
-      font-size: 28px;
-    }
-  }
-}
-
-.info-card, .status-info {
-  height: 100%;
-  margin-bottom: 0;
-}
-
-.section-subtitle {
-  margin-bottom: 5px;
-}
-
-.content-block {
-  margin-top: 5px;
 }
 </style> 
