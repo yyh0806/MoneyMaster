@@ -326,15 +326,15 @@ async def strategy_websocket_endpoint(websocket: WebSocket, symbol: str):
                 if current_analysis and 'reasoning' in current_analysis:
                     reasoning = current_analysis['reasoning']
                     if isinstance(reasoning, list):
-                        # 移除序号，并添加统一的格式
+                        # 格式化每个推理点
                         formatted_reasoning = []
                         for reason in reasoning:
-                            # 移除可能存在的序号（如"1. "，"2. "等）
-                            cleaned_reason = reason.strip()
-                            if cleaned_reason[0].isdigit() and cleaned_reason[1:3] in ['. ', '、']:
-                                cleaned_reason = cleaned_reason[3:].strip()
+                            # 清理文本并确保以句号结尾
+                            cleaned_reason = reason.strip().rstrip('。') + '。'
                             formatted_reasoning.append(cleaned_reason)
-                        current_analysis['reasoning'] = formatted_reasoning
+                        
+                        # 将推理过程转换为前端需要的格式
+                        current_analysis['reasoning'] = '\n'.join(formatted_reasoning)
                 
                 # 构建完整的更新数据
                 update_data = {
