@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, List
+from typing import Dict, List, Optional
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -8,7 +8,7 @@ from decimal import Decimal
 from loguru import logger
 import sys
 
-from src.trading.clients.okx import OKXClient
+from src.trading.clients.okx.client import OKXClient
 from src.trading.strategies.deepseek import DeepseekStrategy
 from src.trading.core.models import init_db, TradeRecord, StrategyState, StrategyStatus
 from src.trading.core.strategy import StoppedState
@@ -20,12 +20,12 @@ from .websocket import manager, setup_event_handlers
 logger.remove()  # 移除默认的日志处理器
 logger.add(
     sys.stderr,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{extra[strategy]}</cyan> | <level>{message}</level>",
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> | <level>{message}</level>",
     level="INFO"
 )
 
 # 创建带有默认strategy字段的日志记录器
-app_logger = logger.bind(strategy="WebSocket")
+app_logger = logger.bind(name="WebSocket")
 
 app = FastAPI(title="MoneyMaster API")
 
@@ -39,13 +39,62 @@ app.add_middleware(
 )
 
 # 创建OKX客户端实例
-okx_client = OKXClient()
+okx_client = OKXClient(
+    symbol="BTC-USDT",
+    api_key=settings.API_KEY,
+    api_secret=settings.SECRET_KEY,
+    passphrase=settings.PASSPHRASE,
+    testnet=settings.USE_TESTNET
+)
 
 # 初始化数据库会话
 db_session = init_db("sqlite:///trading.db")
 
 # 初始化事件处理器
 setup_event_handlers()
+
+# 初始化WebSocket连接
+@app.on_event("startup")
+async def startup_event():
+    """服务启动时初始化WebSocket连接"""
+    app_logger.info("正在初始化WebSocket连接...")
+    try:
+        connected = await okx_client.connect()
+        if connected:
+            app_logger.info("WebSocket连接成功")
+            # 预先订阅所有需要的数据
+            symbol = okx_client.symbol
+            await okx_client.subscribe_ticker(symbol)
+            await okx_client.subscribe_orderbook(symbol)
+            await okx_client.subscribe_trades(symbol)
+            
+            # 订阅K线周期
+            intervals = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
+            for interval in intervals:
+                try:
+                    app_logger.info(f"订阅K线数据: {interval}")
+                    await okx_client.subscribe_candlesticks(symbol, interval)
+                    await asyncio.sleep(1)  # 添加延迟，避免请求过快
+                except Exception as e:
+                    app_logger.error(f"订阅K线数据失败 {interval}: {e}")
+            app_logger.info("市场数据订阅成功")
+            
+            # 启动消息处理
+            await okx_client.ws_client.start()
+        else:
+            app_logger.error("WebSocket连接失败")
+    except Exception as e:
+        app_logger.error(f"初始化WebSocket连接失败: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """服务关闭时断开WebSocket连接"""
+    app_logger.info("正在关闭WebSocket连接...")
+    try:
+        await okx_client.disconnect()
+        app_logger.info("WebSocket连接已关闭")
+    except Exception as e:
+        app_logger.error(f"关闭WebSocket连接失败: {e}")
 
 # 创建策略实例
 strategy = DeepseekStrategy(
@@ -81,46 +130,148 @@ async def root():
 async def get_balance():
     """获取账户余额"""
     try:
-        response = okx_client.get_account_balance()
-        if response.get('code') == '0' and response.get('data'):
-            balances = {}
-            for item in response['data'][0].get('details', []):
-                balances[item['ccy']] = float(item.get('cashBal', 0))
-            return balances
-        return {}
+        balances = await okx_client.get_account_balance()
+        return {
+            "code": "0",
+            "msg": "",
+            "data": balances
+        }
+    except NotImplementedError as e:
+        return {
+            "code": "1",
+            "msg": str(e),
+            "data": None
+        }
     except Exception as e:
-        logger.error(f"获取账户余额失败: {e}")
-        return {}
+        error_msg = f"获取账户余额失败: {e}"
+        logger.error(error_msg)
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": None
+        }
 
 @app.get("/api/market/price/{symbol}")
 async def get_market_price(symbol: str):
     """获取市场价格"""
-    return okx_client.get_market_price(symbol)
+    try:
+        data = await okx_client.get_market_price(symbol)
+        if data:
+            # 确保返回的数据格式正确
+            return {
+                "code": "0",
+                "msg": "",
+                "data": {
+                    "symbol": symbol,
+                    "last_price": data.get("last"),
+                    "best_bid": data.get("best_bid"),
+                    "best_ask": data.get("best_ask"),
+                    "volume_24h": data.get("volume_24h"),
+                    "high_24h": data.get("high_24h"),
+                    "low_24h": data.get("low_24h"),
+                    "timestamp": data.get("timestamp")
+                }
+            }
+        return {
+            "code": "1",
+            "msg": "获取市场价格失败",
+            "data": None
+        }
+    except Exception as e:
+        error_msg = f"获取市场价格失败: {e}"
+        logger.error(error_msg)
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": None
+        }
 
 @app.get("/api/market/kline/{symbol}")
-async def get_kline(symbol: str, interval: str = "15m"):
-    """获取K线数据"""
-    try:
-        app_logger.info(f"请求K线数据: symbol={symbol}, interval={interval}")
-        response = okx_client.get_kline(
-            instId=symbol,
-            bar=interval,
-            limit="100"  # 获取最近100根K线
-        )
-        app_logger.debug(f"OKX K线数据响应: {response}")
+async def get_kline(
+    symbol: str, 
+    interval: str = "15m",
+    start_time: int = None,
+    end_time: int = None,
+    limit: int = 200
+):
+    """获取K线数据
+    
+    Args:
+        symbol: 交易对
+        interval: K线周期，默认15分钟
+        start_time: 开始时间戳（毫秒）
+        end_time: 结束时间戳（毫秒）
+        limit: 返回的K线数量限制，默认200
         
-        if response.get('code') == '0':
-            # 按时间正序排列
-            data = sorted(response.get('data', []), key=lambda x: x[0])
-            return {"code": "0", "msg": "", "data": data}
-        else:
-            error_msg = f"获取K线数据失败: {response.get('msg', '未知错误')}"
-            app_logger.error(error_msg)
-            return {"code": "1", "msg": error_msg, "data": []}
+    Returns:
+        返回指定时间范围内的K线数据
+    """
+    try:
+        app_logger.info(f"请求K线数据: symbol={symbol}, interval={interval}, start_time={start_time}, end_time={end_time}, limit={limit}")
+        
+        # 如果没有指定时间范围，使用默认的时间范围
+        if not end_time:
+            end_time = int(datetime.now().timestamp() * 1000)
+            
+        if not start_time:
+            # 根据interval和limit计算默认的start_time
+            period_map = {
+                "1m": 60,
+                "5m": 300,
+                "15m": 900,
+                "1H": 3600,
+                "4H": 14400,
+                "1D": 86400
+            }
+            period_seconds = period_map.get(interval, 900)  # 默认15分钟
+            start_time = end_time - (period_seconds * limit * 1000)
+        
+        # 获取K线数据
+        candlesticks = await okx_client.get_candlesticks(
+            symbol, 
+            interval,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit
+        )
+        
+        app_logger.debug(f"获取到K线数据: {candlesticks}")
+        
+        if not candlesticks:
+            return {
+                "code": "1",
+                "msg": "获取K线数据失败",
+                "data": []
+            }
+            
+        # 转换为前端需要的格式
+        data = []
+        for candle in candlesticks:
+            data.append([
+                int(candle.timestamp.timestamp() * 1000),  # 时间戳
+                str(candle.open),                          # 开盘价
+                str(candle.high),                          # 最高价
+                str(candle.low),                           # 最低价
+                str(candle.close),                         # 收盘价
+                str(candle.volume),                        # 成交量
+            ])
+            
+        # 按时间正序排列
+        data.sort(key=lambda x: x[0])
+            
+        return {
+            "code": "0",
+            "msg": "",
+            "data": data
+        }
     except Exception as e:
         error_msg = f"获取K线数据异常: {str(e)}"
         app_logger.error(error_msg)
-        return {"code": "1", "msg": error_msg, "data": []}
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": []
+        }
 
 @app.get("/api/trades")
 async def get_trades(symbol: str = None, limit: int = 100):
@@ -274,25 +425,57 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
         
         while True:
             try:
+                # 检查连接是否还在活跃状态
                 if symbol not in manager.active_connections or websocket not in manager.active_connections[symbol]:
+                    app_logger.warning(f"连接已不在活跃列表中: {symbol}")
                     break
                     
-                # 获取市场数据
-                market_data = okx_client.get_market_price(symbol)
-                if not market_data:
-                    await asyncio.sleep(1)
-                    continue
-                    
-                # 只有市场数据变化时才推送
+                # 获取完整的市场数据
+                market_data = {
+                    "ticker": await okx_client.get_ticker(symbol),
+                    "orderbook": await okx_client.get_orderbook(symbol),
+                    "trades": await okx_client.get_trades(symbol, limit=10)  # 最近10条成交
+                }
+                
                 if market_data != last_market_data:
                     try:
+                        # 检查连接状态
+                        if websocket.client_state.DISCONNECTED:
+                            app_logger.warning("连接已断开")
+                            break
+                            
                         await manager.send_personal_message(
-                            json.dumps({"market": market_data}),
+                            json.dumps({
+                                "code": "0",
+                                "msg": "",
+                                "data": market_data
+                            }),
                             websocket
                         )
                         last_market_data = market_data
                     except Exception as e:
                         app_logger.error(f"发送市场数据失败: {e}")
+                        break
+                
+                # 获取K线数据
+                try:
+                    kline_data = await okx_client.get_candlesticks(
+                        symbol,
+                        interval="15m",  # 默认使用15分钟K线
+                        limit=1  # 只获取最新的一根K线
+                    )
+                    
+                    if kline_data:
+                        await manager.send_personal_message(
+                            json.dumps({
+                                "code": "0",
+                                "msg": "",
+                                "data": kline_data
+                            }),
+                            websocket
+                        )
+                except Exception as e:
+                    app_logger.error(f"发送K线数据失败: {e}")
                 
                 await asyncio.sleep(1)
             except Exception as e:
@@ -312,13 +495,17 @@ async def strategy_websocket_endpoint(websocket: WebSocket, symbol: str):
         last_market_data = None
         last_analysis = None
         
+        # 订阅市场数据
+        await okx_client.subscribe_ticker(symbol)
+        await okx_client.subscribe_orderbook(symbol)
+        
         while True:
             try:
                 if symbol not in manager.active_connections or websocket not in manager.active_connections[symbol]:
                     break
                     
                 # 获取市场数据和策略状态
-                market_data = okx_client.get_market_price(symbol)
+                market_data = await okx_client.get_market_price(symbol)
                 strategy_state = strategy.state_info
                 current_analysis = strategy.last_analysis
                 
@@ -365,4 +552,107 @@ async def strategy_websocket_endpoint(websocket: WebSocket, symbol: str):
     except Exception as e:
         app_logger.error(f"WebSocket连接错误: {e}")
     finally:
-        await manager.disconnect(websocket, symbol) 
+        await manager.disconnect(websocket, symbol)
+
+@app.get("/api/v5/market/history-candles")
+async def get_history_candlesticks(
+    instId: str,
+    bar: str = "15m",
+    limit: int = 200,
+    before: Optional[int] = None
+):
+    """获取历史K线数据
+    
+    Args:
+        instId: 产品ID
+        bar: K线周期，如15m, 1H, 4H等
+        limit: 返回的K线数量限制，默认200
+        before: 时间戳（毫秒），返回该时间戳之前的数据
+        
+    Returns:
+        返回指定时间范围内的K线数据
+    """
+    try:
+        app_logger.info(f"请求历史K线数据: instId={instId}, bar={bar}, limit={limit}, before={before}")
+        
+        # 获取历史K线数据
+        candlesticks = await okx_client.get_history_candlesticks(
+            symbol=instId,
+            interval=bar,
+            limit=limit,
+            end_time=before
+        )
+        
+        app_logger.debug(f"获取到历史K线数据: {candlesticks}")
+        
+        if not candlesticks:
+            return {
+                "code": "1",
+                "msg": "获取历史K线数据失败",
+                "data": []
+            }
+            
+        # 转换为前端需要的格式
+        data = []
+        for candle in candlesticks:
+            data.append([
+                int(candle.timestamp.timestamp() * 1000),  # 时间戳
+                str(candle.open),                          # 开盘价
+                str(candle.high),                          # 最高价
+                str(candle.low),                           # 最低价
+                str(candle.close),                         # 收盘价
+                str(candle.volume),                        # 成交量
+            ])
+            
+        # 按时间正序排列
+        data.sort(key=lambda x: x[0])
+            
+        return {
+            "code": "0",
+            "msg": "",
+            "data": data
+        }
+    except Exception as e:
+        error_msg = f"获取历史K线数据异常: {str(e)}"
+        app_logger.error(error_msg)
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": []
+        }
+
+@app.get("/api/market/full-history-kline/{symbol}")
+async def get_full_history_kline(
+    symbol: str,
+    interval: str = "15m"
+):
+    """获取完整的历史K线数据
+    
+    Args:
+        symbol: 交易对
+        interval: K线周期，默认15分钟
+        
+    Returns:
+        返回指定时间范围内的完整K线数据
+    """
+    try:
+        app_logger.info(f"请求完整历史K线数据: symbol={symbol}, interval={interval}")
+        
+        # 获取完整的历史K线数据
+        response = await okx_client.get_full_history_kline(symbol, interval)
+        
+        if response.get("code") == "0":
+            app_logger.info(f"获取到{len(response['data'])}条历史K线数据")
+        else:
+            app_logger.warning(f"获取历史K线数据失败: {response.get('msg')}")
+            
+        return response
+        
+    except Exception as e:
+        error_msg = f"获取历史K线数据异常: {str(e)}"
+        app_logger.error(error_msg)
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": []
+        } 

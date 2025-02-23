@@ -47,21 +47,23 @@
             </div>
           </template>
           <div class="price-info">
-            <div class="price-item">
+            <div class="latest-price">
               <span class="label">最新价格:</span>
-              <span class="value" :class="priceChangeClass">{{ formatPrice(marketData.last) }}</span>
+              <span class="value" :class="priceChangeClass">{{ marketData.last_price || '-' }}</span>
             </div>
-            <div class="price-item">
-              <span class="label">24h高:</span>
-              <span class="value">{{ formatPrice(marketData.high24h) }}</span>
-            </div>
-            <div class="price-item">
-              <span class="label">24h低:</span>
-              <span class="value">{{ formatPrice(marketData.low24h) }}</span>
-            </div>
-            <div class="price-item">
-              <span class="label">24h成交量:</span>
-              <span class="value">{{ formatVolume(marketData.vol24h) }}</span>
+            <div class="price-details">
+              <div class="detail-item">
+                <span class="label">24h高:</span>
+                <span class="value">{{ marketData.high_24h || '-' }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="label">24h低:</span>
+                <span class="value">{{ marketData.low_24h || '-' }}</span>
+              </div>
+              <div class="detail-item">
+                <span class="label">24h成交量:</span>
+                <span class="value">{{ marketData.volume_24h || '-' }}</span>
+              </div>
             </div>
           </div>
         </el-card>
@@ -83,7 +85,7 @@
                 </el-select>
               </div>
               <div class="chart-controls">
-                <el-select v-model="selectedPeriod" size="small" @change="fetchKlineData">
+                <el-select v-model="selectedPeriod" size="small" @change="handlePeriodChange">
                   <el-option label="1分钟" value="1m" />
                   <el-option label="5分钟" value="5m" />
                   <el-option label="15分钟" value="15m" />
@@ -408,25 +410,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, InfoFilled } from '@element-plus/icons-vue'
 import axios from 'axios'
 import dayjs from 'dayjs'
 import * as echarts from 'echarts'
+import { useWebSocket } from '@vueuse/core'
 
 // 使用相对路径
 const API_BASE_URL = ''
 const symbol = ref('BTC-USDT')
-const marketData = ref({})
+const marketData = ref({
+  last_price: '-',
+  best_bid: '-',
+  best_ask: '-',
+  high_24h: '-',
+  low_24h: '-',
+  volume_24h: '-'
+})
 const strategyState = ref({})
 const accountBalances = ref({})
 const tradeHistory = ref([])
 const isStrategyRunning = ref(false)
 const selectedPeriod = ref('15m')
 const chartContainer = ref(null)
+const chart = ref(null)
 let ws = null
-let chart = null
 const isLoading = ref(false)
 const isClearing = ref(false)
 const drawerVisible = ref(false)
@@ -463,17 +473,26 @@ const recommendationClass = computed(() => {
 })
 
 // 格式化函数
-const formatPrice = (price) => price ? `$${Number(price).toFixed(2)}` : '-'
+const formatPrice = (price) => {
+  if (!price || price === '0' || price === '-') return '-'
+  return `$${Number(price).toFixed(2)}`
+}
+
 const formatQuantity = (qty) => qty ? Number(qty).toFixed(6) : '-'
-const formatVolume = (vol) => vol ? Number(vol).toFixed(2) : '-'
+const formatVolume = (vol) => {
+  if (!vol || vol === '0' || vol === '-') return '-'
+  return Number(vol).toFixed(2)
+}
 const formatPnL = (pnl) => pnl ? `$${Number(pnl).toFixed(2)}` : '-'
 const formatBalance = (balance) => balance ? Number(balance).toFixed(6) : '-'
 const formatDateTime = (datetime) => dayjs(datetime).format('YYYY-MM-DD HH:mm:ss')
 
 // 样式计算
 const priceChangeClass = computed(() => {
-  if (!marketData.value.last || !marketData.value.open24h) return ''
-  return Number(marketData.value.last) >= Number(marketData.value.open24h) ? 'text-success' : 'text-danger'
+  if (!marketData.value.last_price || marketData.value.last_price === '-') return ''
+  const lastPrice = parseFloat(marketData.value.last_price)
+  const prevPrice = parseFloat(marketData.value._prevPrice || marketData.value.last_price)
+  return lastPrice > prevPrice ? 'price-up' : lastPrice < prevPrice ? 'price-down' : ''
 })
 
 const pnlClass = (pnl) => {
@@ -493,118 +512,32 @@ const logPerformance = (stage: string, startTime: number) => {
   log(`性能追踪 - ${stage}: ${duration.toFixed(2)}ms`)
 }
 
-// WebSocket连接
-const connectWebSocket = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/ws/strategy/${symbol.value}`
-  
-  // 如果已经有连接，先关闭
-  if (ws) {
-    log('关闭现有WebSocket连接')
-    ws.close()
-    ws = null
-  }
-  
-  log('建立新的WebSocket连接:', wsUrl)
-  ws = new WebSocket(wsUrl)
-  
-  ws.onmessage = (event) => {
-    const receiveTime = performance.now()
-    log('收到WebSocket消息，开始处理')
+// 获取市场数据
+const fetchMarketData = async () => {
+  try {
+    log('获取市场数据:', symbol.value)
+    const response = await axios.get(`${API_BASE_URL}/api/market/price/${symbol.value}`)
+    log('市场数据响应:', response.data)
     
-    try {
-      const parseStart = performance.now()
-      const data = JSON.parse(event.data)
-      logPerformance('JSON解析', parseStart)
-      
-      // 处理市场数据
-      if (data.market?.data?.[0]) {
-        const marketStart = performance.now()
-        marketData.value = data.market.data[0]
-        logPerformance('市场数据更新', marketStart)
+    if (response.data && response.data.data) {
+      marketData.value = {
+        _prevPrice: marketData.value.last_price,
+        last_price: formatPrice(response.data.data.last_price),
+        best_bid: formatPrice(response.data.data.best_bid),
+        best_ask: formatPrice(response.data.data.best_ask),
+        high_24h: formatPrice(response.data.data.high_24h),
+        low_24h: formatPrice(response.data.data.low_24h),
+        volume_24h: formatVolume(response.data.data.volume_24h),
+        timestamp: response.data.data.timestamp || new Date().toISOString()
       }
-      
-      // 处理策略状态
-      if (data.strategy) {
-        const strategyStart = performance.now()
-        log('收到策略状态更新:', data.strategy)
-        const oldStatus = strategyState.value?.status
-        
-        // 更新状态前先检查是否真的有变化
-        const hasStatusChanged = oldStatus !== data.strategy.status
-        const hasPositionChanged = strategyState.value?.position !== data.strategy.position
-        const hasPnLChanged = strategyState.value?.total_pnl !== data.strategy.total_pnl
-        
-        // 更新状态
-        strategyState.value = data.strategy
-        
-        // 如果状态发生实质性变化，显示通知
-        if (hasStatusChanged || hasPositionChanged || hasPnLChanged) {
-          const statusMap = {
-            running: '运行中',
-            stopped: '已停止',
-            paused: '已暂停',
-            error: '发生错误'
-          }
-          
-          if (hasStatusChanged) {
-            ElMessage.info(`策略状态变更为: ${statusMap[data.strategy.status] || data.strategy.status}`)
-          }
-        }
-        logPerformance('策略状态更新', strategyStart)
-      }
-      
-      // 处理AI分析结果
-      if (data.analysis) {
-        const analysisStart = performance.now()
-        log('收到AI分析更新:', data.analysis)
-        
-        // 确保数据存在并且有效
-        if (typeof data.analysis === 'object') {
-          analysis.value = {
-            analysis: data.analysis.analysis || '',
-            recommendation: data.analysis.recommendation || '持有',
-            confidence: data.analysis.confidence || 0,
-            reasoning: data.analysis.reasoning || '',
-            timestamp: data.analysis.timestamp || Date.now()
-          }
-          
-          // 调试日志
-          log('更新后的分析数据:', analysis.value)
-        } else {
-          log('无效的分析数据格式:', data.analysis)
-        }
-        
-        logPerformance('AI分析更新', analysisStart)
-      }
-      
-      logPerformance('总处理时间', receiveTime)
-    } catch (error) {
-      log('处理WebSocket消息失败:', error)
+      log('更新市场数据:', marketData.value)
+    } else {
+      log('获取市场数据失败:', response.data)
+      ElMessage.warning('获取市场数据失败')
     }
-  }
-
-  ws.onopen = () => {
-    log('WebSocket连接已建立')
-    // 连接成功后立即获取最新状态
-    fetchStrategyState()
-  }
-
-  ws.onclose = (event) => {
-    log('WebSocket连接已关闭，code:', event.code, '原因:', event.reason)
-    ws = null
-    // 如果不是主动关闭的连接，则尝试重连
-    if (event.code !== 1000) {
-      log('3秒后尝试重新连接...')
-      setTimeout(connectWebSocket, 3000)
-    }
-  }
-
-  ws.onerror = (error) => {
-    log('WebSocket错误:', error)
-    ElMessage.error('WebSocket连接错误，正在尝试重新连接...')
-    // 发生错误时重新获取状态
-    fetchStrategyState()
+  } catch (error) {
+    log('获取市场数据异常:', error)
+    ElMessage.error('获取市场数据失败')
   }
 }
 
@@ -794,335 +727,207 @@ const fetchStrategyState = async () => {
   }
 }
 
-// 格式化K线数据
-const formatKlineData = (data) => {
-  return data.map(item => {
-    // OKX的K线数据格式：[timestamp, open, high, low, close, volume, ...]
-    log('原始数据项:', item)
-    const [timestamp, open, high, low, close, volume] = item
-    log('解析后的原始数据:', {
-      timestamp: dayjs(parseInt(timestamp)).format('YYYY-MM-DD HH:mm:ss'),
-      open: Number(open),
-      high: Number(high),
-      low: Number(low),
-      close: Number(close),
-      volume: Number(volume)
-    })
-    
-    // 确保所有价格数据都是数值类型
-    const formattedData = {
-      time: dayjs(parseInt(timestamp)).format('YYYY-MM-DD HH:mm'),
-      open: Number(open),
-      high: Number(high),
-      low: Number(low),
-      close: Number(close),
-      volume: Number(volume)
-    }
-    
-    // 验证价格的合理性
-    if (formattedData.high < formattedData.close || formattedData.high < formattedData.open) {
-      log('数据异常: 最高价低于开盘价或收盘价', formattedData)
-    }
-    if (formattedData.low > formattedData.close || formattedData.low > formattedData.open) {
-      log('数据异常: 最低价高于开盘价或收盘价', formattedData)
-    }
-    
-    return formattedData
-  })
-}
-
-// 初始化图表
-const initChart = () => {
-  if (chart) {
-    chart.dispose()
-  }
-  chart = echarts.init(chartContainer.value)
-}
-
 // 更新图表
 const updateChart = (klineData) => {
-  if (!chart) {
+  console.log('开始更新图表，数据长度:', klineData.length)
+  
+  if (!chart.value) {
+    console.log('图表未初始化，正在初始化...')
     initChart()
   }
 
-  // 记录传递给ECharts的数据
-  const candlestickData = klineData.map(item => {
-    const data = [
-      item.open,    // 开盘价
-      item.close,   // 收盘价
-      item.low,     // 最低价
-      item.high     // 最高价
-    ]
-    log('K线数据转换:', {
-      from: item,
-      to: data
-    })
-    return data
-  })
-
-  const option = {
-    animation: false,
-    backgroundColor: '#000000',
-    textStyle: {
-      color: '#ffffff'
-    },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'cross'
-      },
-      backgroundColor: '#141414',
-      borderColor: '#262626',
-      textStyle: {
-        color: '#ffffff'
-      },
-      formatter: (params) => {
-        const candleData = params.find(p => p.seriesName === '价格')
-        const volumeData = params.find(p => p.seriesName === '成交量')
-        
-        if (volumeData && volumeData.componentIndex === 1) {
-          return `
-            时间: ${params[0].axisValue}<br/>
-            成交量: ${Number(volumeData.value).toFixed(4)}
-          `
-        } else if (candleData) {
-          log('Tooltip原始数据:', candleData.data)
-          // OKX的K线数据格式：[timestamp, open, high, low, close, volume]
-          const [timestamp, open, high, low, close] = candleData.data
-          log('Tooltip解析后的数据:', {
-            time: params[0].axisValue,
-            open,
-            high,
-            low,
-            close
-          })
-          return `
-            时间: ${params[0].axisValue}<br/>
-            开盘: $${Number(open).toFixed(2)}<br/>
-            收盘: $${Number(close).toFixed(2)}<br/>
-            最高: $${Number(high).toFixed(2)}<br/>
-            最低: $${Number(low).toFixed(2)}
-          `
-        }
-        return ''
-      }
-    },
-    legend: {
-      data: ['价格', '成交量'],
-      top: 0
-    },
-    grid: [{
-      left: '10%',
-      right: '10%',
-      height: '60%'
-    }, {
-      left: '10%',
-      right: '10%',
-      top: '75%',
-      height: '15%'
-    }],
-    xAxis: [{
-      type: 'category',
-      data: klineData.map(item => item.time),
-      scale: true,
-      boundaryGap: false,
-      axisLine: { 
-        onZero: false,
-        lineStyle: {
-          color: '#404040'
-        }
-      },
-      splitLine: { 
-        show: true,
-        lineStyle: {
-          color: '#1a1a1a'
-        }
-      },
-      axisLabel: {
-        formatter: (value) => dayjs(value).format('HH:mm'),
-        color: '#808080'
-      }
-    }, {
-      type: 'category',
-      gridIndex: 1,
-      data: klineData.map(item => item.time),
-      scale: true,
-      boundaryGap: false,
-      axisLine: { 
-        onZero: false,
-        lineStyle: {
-          color: '#404040'
-        }
-      },
-      axisTick: { show: false },
-      splitLine: { show: false },
-      axisLabel: { show: false },
-      min: 'dataMin',
-      max: 'dataMax'
-    }],
-    yAxis: [{
-      scale: true,
-      splitArea: { 
-        show: true,
-        areaStyle: {
-          color: ['#000000', '#0a0a0a']
-        }
-      },
-      splitLine: {
-        lineStyle: {
-          color: '#1a1a1a'
-        }
-      },
-      axisLine: {
-        lineStyle: {
-          color: '#404040'
-        }
-      },
-      axisLabel: {
-        formatter: (value) => `$${value}`,
-        color: '#808080'
-      }
-    }, {
-      scale: true,
-      gridIndex: 1,
-      splitNumber: 2,
-      axisLabel: { show: false },
-      axisLine: { show: false },
-      axisTick: { show: false },
-      splitLine: { show: false }
-    }],
-    dataZoom: [{
-      type: 'inside',
-      xAxisIndex: [0, 1],
-      start: 0,
-      end: 100
-    }, {
-      show: true,
-      xAxisIndex: [0, 1],
-      type: 'slider',
-      bottom: '5%',
-      start: 0,
-      end: 100,
-      backgroundColor: '#141414',
-      borderColor: '#262626',
-      fillerColor: 'rgba(38, 38, 38, 0.2)',
-      handleStyle: {
-        color: '#606060',
-        borderColor: '#808080'
-      },
-      moveHandleStyle: {
-        color: '#606060',
-        borderColor: '#808080'
-      },
-      selectedDataBackground: {
-        lineStyle: {
-          color: '#606060'
-        },
-        areaStyle: {
-          color: '#262626'
-        }
-      },
-      emphasis: {
-        handleStyle: {
-          borderColor: '#909090'
-        },
-        moveHandleStyle: {
-          borderColor: '#909090'
-        }
-      },
-      dataBackground: {
-        lineStyle: {
-          color: '#404040'
-        },
-        areaStyle: {
-          color: '#262626'
-        }
-      },
-      textStyle: {
-        color: '#808080'
-      }
-    }],
-    series: [{
-      name: '价格',
-      type: 'candlestick',
-      data: candlestickData,
-      itemStyle: {
-        color: '#67C23A',
-        color0: '#F56C6C',
-        borderColor: '#67C23A',
-        borderColor0: '#F56C6C'
-      }
-    }, {
-      name: '成交量',
-      type: 'bar',
-      xAxisIndex: 1,
-      yAxisIndex: 1,
-      data: klineData.map(item => ({
-        value: item.volume,
-        itemStyle: {
-          color: item.close > item.open ? '#67C23A' : '#F56C6C'
-        }
-      }))
-    }]
+  if (!chart.value) {
+    console.error('图表初始化失败')
+    return
   }
 
-  chart.setOption(option, true)
+  try {
+    const option = chart.value.getOption()
+    const data = option.series[0].data
+    
+    // 更新或添加新的K线数据
+    const timestamp = klineData[0]
+    const index = data.findIndex(item => item[0] === timestamp)
+    
+    if (index !== -1) {
+      data[index] = klineData
+    } else {
+      data.push(klineData)
+      // 保持数据按时间排序
+      data.sort((a, b) => a[0] - b[0])
+    }
+    
+    // 更新图表
+    chart.value.setOption({
+      series: [{
+        data: data.map(item => [
+          item[0],
+          item[1],
+          item[2],
+          item[3],
+          item[4],
+          item[5]
+        ])
+      }]
+    })
+    console.log('图表更新完成')
+  } catch (error) {
+    console.error('更新图表失败:', error)
+    ElMessage.error('更新图表失败')
+  }
 }
 
 // 获取K线数据
 const fetchKlineData = async () => {
   try {
-    const response = await axios.get(
-      `${API_BASE_URL}/api/market/kline/${symbol.value}?interval=${selectedPeriod.value}`
-    )
-    if (response.data?.code === '0' && response.data?.data) {
-      const klineData = formatKlineData(response.data.data)
-      updateChart(klineData)
+    log('获取K线数据:', {
+      symbol: symbol.value,
+      interval: selectedPeriod.value
+    })
+    
+    const response = await axios.get(`${API_BASE_URL}/api/market/full-history-kline/${symbol.value}`, {
+      params: {
+        interval: selectedPeriod.value
+      }
+    })
+    
+    log('K线数据响应:', response.data)
+    
+    if (response.data?.code === '0' && Array.isArray(response.data?.data)) {
+      const data = response.data.data
+      if (data.length > 0) {
+        // 初始化图表
+        if (!chart.value) {
+          initChart()
+        }
+        
+        // 设置图表配置
+        const option = {
+          grid: {
+            left: '10%',
+            right: '10%',
+            bottom: '15%'
+          },
+          xAxis: {
+            type: 'category',
+            data: []
+          },
+          yAxis: {
+            type: 'value',
+            scale: true
+          },
+          series: [{
+            type: 'candlestick',
+            data: data.map(item => [
+              item[0], // 时间戳
+              item[1], // 开盘价
+              item[2], // 最高价
+              item[3], // 最低价
+              item[4]  // 收盘价
+            ])
+          }],
+          tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+              type: 'cross'
+            },
+            formatter: (params) => {
+              const item = params[0]
+              const date = new Date(item.data[0])
+              return [
+                `时间: ${date.toLocaleString()}`,
+                `开盘价: ${item.data[1]}`,
+                `最高价: ${item.data[2]}`,
+                `最低价: ${item.data[3]}`,
+                `收盘价: ${item.data[4]}`
+              ].join('<br/>')
+            }
+          },
+          dataZoom: [
+            {
+              type: 'inside',
+              start: 50,
+              end: 100
+            },
+            {
+              show: true,
+              type: 'slider',
+              bottom: '5%',
+              start: 50,
+              end: 100
+            }
+          ]
+        }
+        
+        chart.value.setOption(option)
+        log('K线图更新成功')
+      } else {
+        log('没有有效的K线数据')
+        ElMessage.warning('暂无有效的K线数据')
+      }
     } else {
-      ElMessage.error(response.data?.msg || '获取K线数据失败')
+      log('获取K线数据失败:', response.data)
+      ElMessage.warning('获取K线数据失败')
     }
   } catch (error) {
+    log('获取K线数据异常:', error)
     ElMessage.error('获取K线数据失败')
   }
 }
 
-// 监听窗口大小变化
-const handleResize = () => {
-  if (chart) {
-    chart.resize()
+// WebSocket处理K线数据更新
+const handleKlineUpdate = (klineData) => {
+  if (!chart.value) return
+  
+  const option = chart.value.getOption()
+  const data = option.series[0].data
+  
+  // 更新现有K线或添加新的K线
+  const timestamp = klineData[0]
+  const index = data.findIndex(item => item[0] === timestamp)
+  
+  if (index !== -1) {
+    // 更新现有K线
+    data[index] = klineData
+  } else {
+    // 添加新的K线
+    data.push(klineData)
+    // 保持数据按时间排序
+    data.sort((a, b) => a[0] - b[0])
+  }
+  
+  // 更新图表
+  chart.value.setOption({
+    series: [{
+      data: data
+    }]
+  })
+}
+
+// 处理WebSocket消息
+const handleWebSocketMessage = (message) => {
+  try {
+    const data = JSON.parse(message)
+    if (data.code === '0' && data.data) {
+      if (data.data.type === 'kline') {
+        handleKlineUpdate(data.data.kline[0])
+      }
+    }
+  } catch (error) {
+    log('处理WebSocket消息失败:', error)
   }
 }
 
-const handleClearHistory = async () => {
-  try {
-    // 显示确认对话框
-    await ElMessageBox.confirm('确定要清空所有历史记录吗？此操作不可恢复！', '警告', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    
-    isClearing.value = true
-    const response = await axios.post(`${API_BASE_URL}/api/clear_history`)
-    if (response.data.status === 'success') {
-      ElMessage.success('历史记录已清空')
-      // 刷新数据
-      await fetchStrategyState()
-      await fetchTradeHistory()
-      await fetchAccountBalance()
-    }
-  } catch (error) {
-    if (error !== 'cancel') {
-      log('清空历史记录失败:', error)
-      ElMessage.error(error.response?.data?.detail || '清空历史记录失败')
-    }
-  } finally {
-    isClearing.value = false
-  }
+// 处理周期变更
+const handlePeriodChange = () => {
+  fetchKlineData()
 }
 
 // 处理交易对变更
 const handleSymbolChange = async () => {
+  // 清空历史数据
+  historicalData.value.clear()
+  
   // 断开旧的WebSocket连接
   if (ws) {
     ws.close()
@@ -1130,9 +935,6 @@ const handleSymbolChange = async () => {
   
   // 重新获取市场数据
   await fetchStrategyState()
-  
-  // 重新连接WebSocket
-  connectWebSocket()
   
   // 重新获取K线数据
   fetchKlineData()
@@ -1144,36 +946,39 @@ const handleSymbolChange = async () => {
   fetchAccountBalance()
 }
 
-onMounted(async () => {
-  await fetchStrategyState()  // 首次加载时获取策略状态
-  connectWebSocket()
-  fetchTradeHistory()
-  fetchAccountBalance()
-  fetchKlineData()
-  window.addEventListener('resize', handleResize)
+// 组件挂载时启动自动刷新
+onMounted(() => {
+  log('组件挂载')
+  fetchMarketData()  // 先获取一次市场数据
+  connectWebSocket() // 然后建立WebSocket连接
+  if (chartContainer.value) {
+    initChart()
+    fetchKlineData()
+  }
+})
+
+// 监听窗口大小变化
+window.addEventListener('resize', () => {
+  if (chart.value) {
+    chart.value.resize()
+  }
 })
 
 onUnmounted(() => {
+  console.log('组件卸载')
+  window.removeEventListener('resize', () => {
+    if (chart.value) {
+      chart.value.resize()
+    }
+  })
+  if (chart.value) {
+    chart.value.dispose()
+    chart.value = null
+  }
   if (ws) {
-    log('组件卸载，关闭WebSocket连接')
-    ws.close(1000, 'Component unmounted')
-    ws = null
-  }
-  window.removeEventListener('resize', handleResize)
-  if (chart) {
-    chart.dispose()
-  }
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
+    ws.close()
   }
 })
-
-// 添加到定时刷新
-let refreshInterval = setInterval(() => {
-  fetchTradeHistory()
-  fetchAccountBalance()
-  fetchKlineData()
-}, 60000)
 
 const getRecommendationText = computed(() => {
   const recommendationMap = {
@@ -1183,6 +988,128 @@ const getRecommendationText = computed(() => {
   }
   return recommendationMap[analysis.value.recommendation] || '观望'
 })
+
+// 初始化图表
+const initChart = () => {
+  if (!chartContainer.value) {
+    console.error('图表容器未找到')
+    return
+  }
+
+  try {
+    chart.value = echarts.init(chartContainer.value, 'dark')
+    console.log('图表初始化成功')
+  } catch (error) {
+    console.error('初始化图表失败:', error)
+    ElMessage.error('初始化图表失败')
+  }
+}
+
+// WebSocket连接
+const connectWebSocket = () => {
+  try {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${protocol}//${window.location.host}/ws/market/${symbol.value}/${selectedPeriod.value}`
+    log('连接WebSocket:', wsUrl)
+    
+    if (ws) {
+      ws.close()
+    }
+    
+    ws = new WebSocket(wsUrl)
+    
+    ws.onopen = () => {
+      log('WebSocket连接已建立')
+      // 发送订阅消息
+      const subscribeMsg = {
+        op: 'subscribe',
+        args: [
+          { channel: 'ticker', instId: symbol.value },
+          { channel: `candle${selectedPeriod.value}`, instId: symbol.value }
+        ]
+      }
+      ws.send(JSON.stringify(subscribeMsg))
+    }
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        log('收到WebSocket消息:', data)
+        
+        if (data.code === '0' && data.data) {
+          if (data.data.type === 'ticker') {
+            // 更新市场数据
+            const ticker = data.data.ticker
+            marketData.value = {
+              _prevPrice: marketData.value.last_price,
+              last_price: formatPrice(ticker.last_price),
+              best_bid: formatPrice(ticker.best_bid),
+              best_ask: formatPrice(ticker.best_ask),
+              high_24h: formatPrice(ticker.high_24h),
+              low_24h: formatPrice(ticker.low_24h),
+              volume_24h: formatVolume(ticker.volume_24h)
+            }
+          } else if (data.data.type === 'kline') {
+            // 更新K线图
+            const klineData = data.data.kline
+            if (Array.isArray(klineData) && klineData.length > 0) {
+              // 确保图表已初始化
+              if (!chart.value) {
+                initChart()
+              }
+              
+              // 更新图表数据
+              const option = chart.value.getOption()
+              const chartData = option.series[0].data || []
+              
+              // 更新或添加新的K线数据
+              klineData.forEach(kline => {
+                const timestamp = kline[0]
+                const index = chartData.findIndex(item => item[0] === timestamp)
+                
+                if (index !== -1) {
+                  chartData[index] = kline
+                } else {
+                  chartData.push(kline)
+                }
+              })
+              
+              // 保持数据按时间排序
+              chartData.sort((a, b) => a[0] - b[0])
+              
+              // 更新图表
+              chart.value.setOption({
+                series: [{
+                  data: chartData
+                }]
+              })
+            }
+          }
+        }
+      } catch (error) {
+        log('处理WebSocket消息失败:', error)
+      }
+    }
+    
+    ws.onerror = (error) => {
+      log('WebSocket错误:', error)
+      ElMessage.error('WebSocket连接错误')
+    }
+    
+    ws.onclose = () => {
+      log('WebSocket连接已关闭')
+      // 尝试重新连接
+      setTimeout(() => {
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          connectWebSocket()
+        }
+      }, 5000)
+    }
+  } catch (error) {
+    log('创建WebSocket连接失败:', error)
+    ElMessage.error('创建WebSocket连接失败')
+  }
+}
 </script>
 
 <style scoped>
