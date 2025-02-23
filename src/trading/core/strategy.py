@@ -9,7 +9,7 @@ import asyncio
 from .models import TradeRecord, StrategyState, StrategyStatus
 from .risk import RiskManager, RiskLimit, Position
 from .order import Order, OrderSide
-from ..client import OKXClient
+from ..clients.okx import OKXClient
 
 # 配置日志
 logger.remove()  # 移除默认的日志处理器

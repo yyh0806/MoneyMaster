@@ -8,8 +8,8 @@ from decimal import Decimal
 from loguru import logger
 import sys
 
-from src.trading.client import OKXClient
-from src.trading.strategies.deepseek_strategy import DeepseekStrategy
+from src.trading.clients.okx import OKXClient
+from src.trading.strategies.deepseek import DeepseekStrategy
 from src.trading.core.models import init_db, TradeRecord, StrategyState, StrategyStatus
 from src.trading.core.strategy import StoppedState
 from src.trading.core.risk import RiskLimit
@@ -321,6 +321,20 @@ async def strategy_websocket_endpoint(websocket: WebSocket, symbol: str):
                 market_data = okx_client.get_market_price(symbol)
                 strategy_state = strategy.state_info
                 current_analysis = strategy.last_analysis
+                
+                # 格式化推理过程
+                if current_analysis and 'reasoning' in current_analysis:
+                    reasoning = current_analysis['reasoning']
+                    if isinstance(reasoning, list):
+                        # 移除序号，并添加统一的格式
+                        formatted_reasoning = []
+                        for reason in reasoning:
+                            # 移除可能存在的序号（如"1. "，"2. "等）
+                            cleaned_reason = reason.strip()
+                            if cleaned_reason[0].isdigit() and cleaned_reason[1:3] in ['. ', '、']:
+                                cleaned_reason = cleaned_reason[3:].strip()
+                            formatted_reasoning.append(cleaned_reason)
+                        current_analysis['reasoning'] = formatted_reasoning
                 
                 # 构建完整的更新数据
                 update_data = {
