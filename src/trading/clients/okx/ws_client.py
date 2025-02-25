@@ -44,6 +44,7 @@ class OKXWebSocketClient:
         self.api_secret = api_secret
         self.passphrase = passphrase
         self.parser = OKXDataParser()
+        self.is_logged_in = False  # 添加登录状态属性
         
         # 创建WebSocket管理器
         self._ws_public = OKXWebSocketManager(
@@ -82,6 +83,12 @@ class OKXWebSocketClient:
             public_connected = await self._ws_public.connect()
             private_connected = await self._ws_private.connect()
             business_connected = await self._ws_business.connect()
+            
+            # 更新登录状态
+            self.is_logged_in = (self._ws_public.is_logged_in and 
+                               self._ws_private.is_logged_in and 
+                               self._ws_business.is_logged_in)
+            
             return public_connected and private_connected and business_connected
         except Exception as e:
             logger.error(f"WebSocket连接失败: {e}")
@@ -244,7 +251,8 @@ class OKXWebSocketClient:
                 close=Decimal(data[4]),
                 volume=Decimal(data[5]),
                 volume_currency=Decimal(data[6]) if len(data) > 6 else None,
-                trades_count=int(data[7]) if len(data) > 7 else None
+                # 修复：将浮点数字符串先转换为浮点数，再转为整数
+                trades_count=int(float(data[7])) if len(data) > 7 and data[7] else None
             )
             
             # 初始化时间周期的缓存
@@ -260,14 +268,28 @@ class OKXWebSocketClient:
                 self._candlesticks[interval].popitem(last=False)
                 
         except Exception as e:
+            # 增加详细的错误日志
+            logger.error(f"处理K线数据失败: {e}, channel={channel}, data={data}")
             raise OKXParseError("Candlestick", str(data), str(e))
             
     async def subscribe_basic_data(self):
         """订阅基础市场数据"""
         try:
-            await self.subscribe_ticker(self.symbol)
-            await self.subscribe_orderbook(self.symbol)
-            await self.subscribe_trades(self.symbol)
+            # 使用一次性订阅多个频道的方式，避免重复订阅
+            await self._ws_public.subscribe("", [
+                {
+                    "channel": "tickers",
+                    "instId": self.symbol
+                },
+                {
+                    "channel": "books",
+                    "instId": self.symbol
+                },
+                {
+                    "channel": "trades",
+                    "instId": self.symbol
+                }
+            ])
         except Exception as e:
             logger.error(f"订阅基础数据失败: {e}")
             
@@ -335,16 +357,16 @@ class OKXWebSocketClient:
         """订阅账户余额更新"""
         if not all([self.api_key, self.api_secret, self.passphrase]):
             raise OKXAuthenticationError("订阅余额需要API密钥")
-        await self._ws_business.subscribe("account", [{
-            "channel": "account",
+        await self._ws_private.subscribe(OKXConfig.TOPICS["ACCOUNT"], [{
+            "channel": OKXConfig.TOPICS["ACCOUNT"]
         }])
         
     async def subscribe_account(self):
         """订阅账户信息更新"""
         if not all([self.api_key, self.api_secret, self.passphrase]):
             raise OKXAuthenticationError("订阅账户信息需要API密钥")
-        await self._ws_business.subscribe("account", [{
-            "channel": "account",
+        await self._ws_private.subscribe(OKXConfig.TOPICS["ACCOUNT"], [{
+            "channel": OKXConfig.TOPICS["ACCOUNT"],
             "ccy": ["BTC","USDT"]
         }])
         
@@ -518,8 +540,9 @@ class OKXWebSocketClient:
         if interval not in OKXConfig.INTERVAL_MAP:
             raise OKXValidationError(f"不支持的时间周期: {interval}")
             
-        channel = f"candle{interval}"
-        await self._ws_public.subscribe(channel, [{
+        channel = f"{OKXConfig.TOPICS['CANDLE']}{interval}"
+        
+        await self._ws_business.subscribe(channel, [{
             "channel": channel,
             "instId": symbol
         }])
@@ -552,8 +575,42 @@ class OKXWebSocketClient:
         """处理账户更新消息"""
         try:
             data = message.get('data', [])
-            for balance_data in data:
+            if data:
+                balance_data = data[0]  # 获取第一个数据项
                 balance = self.parser.parse_balance(balance_data)
-                logger.info(f"账户余额更新: {balance.currency}, 可用: {balance.available}")
+                
+                # 遍历所有币种余额并记录
+                for currency, details in balance["balances"].items():
+                    logger.info(f"账户余额更新: {currency}, "
+                              f"总额: {details['total']}, "
+                              f"可用: {details['available']}, "
+                              f"冻结: {details['frozen']}")
+                
+                logger.info(f"账户总权益: {balance['total_equity']}")
+                
         except Exception as e:
-            logger.error(f"处理账户更新失败: {e}") 
+            logger.error(f"处理账户更新失败: {e}")
+
+    async def start(self):
+        """启动WebSocket消息处理
+        
+        该方法在连接成功后调用，用于启动后台处理任务
+        """
+        # 实际上我们已经在ws_manager的connect方法中启动了消息处理任务
+        # 这里只是为了满足API.app中的调用
+        logger.info("WebSocket消息处理已启动")
+        return 
+
+    async def _handle_balance(self, data: Dict):
+        """处理账户余额更新
+        
+        Args:
+            data: 账户余额数据
+        """
+        try:
+            balance = self.parser.parse_balance(data)
+            if callable(self.on_balance):
+                await self.on_balance(balance)
+        except Exception as e:
+            logger.error(f"处理账户更新失败: {e}")
+            raise 

@@ -52,6 +52,7 @@ class OKXWebSocketManager:
         self._receive_task: Optional[asyncio.Task] = None
         self._subscriptions: Dict[str, Dict[str, Any]] = {}
         self.last_ping_time: Optional[datetime] = None
+        self.last_message_time: Optional[datetime] = None  # 添加最后接收消息时间
         
         # 消息处理队列
         self._message_queue: asyncio.Queue = asyncio.Queue()
@@ -212,6 +213,7 @@ class OKXWebSocketManager:
         try:
             self.ws = await websockets.connect(self.url)
             self.is_connected = True
+            self.last_message_time = datetime.now()  # 重置最后消息时间
             
             # 如果有API密钥，先进行登录
             if all([self.api_key, self.api_secret, self.passphrase]):
@@ -331,55 +333,140 @@ class OKXWebSocketManager:
                     "args": [{"channel": channel, **args}]
                 })
                 
+    async def _handle_disconnect(self):
+        """处理断开连接"""
+        # 先取消所有任务
+        for task in [self._ping_task, self._receive_task, self._process_task]:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        # 关闭WebSocket连接
+        if self.ws:
+            try:
+                await self.ws.close()
+            except Exception as e:
+                logger.error(f"关闭WebSocket连接失败: {e}")
+            finally:
+                self.ws = None
+
+        # 重置状态
+        self.is_connected = False
+        self.is_logged_in = False
+
+        # 如果需要重连
+        if self.should_reconnect:
+            logger.info(f"尝试重新连接WebSocket，延迟{self.reconnect_delay}秒")
+            await asyncio.sleep(self.reconnect_delay)
+            await self.connect()
+
     async def _ping_loop(self):
         """心跳循环"""
         while self.is_connected:
             try:
-                await asyncio.sleep(self.ping_interval)
-                await self.ws.ping()
-                self.last_ping_time = datetime.now()
-                logger.debug("已发送心跳")
+                # 检查上次消息接收时间，如果超过25秒未收到消息，发送心跳
+                if self.last_message_time:
+                    time_since_last_message = (datetime.now() - self.last_message_time).total_seconds()
+                    if time_since_last_message < 25:
+                        # 如果最近收到消息，等待到25秒时再发送ping
+                        wait_time = 25 - time_since_last_message
+                        await asyncio.sleep(wait_time)
+                    
+                # 发送ping
+                if self.ws and self.is_connected:
+                    await self.ws.send('ping')
+                    self.last_ping_time = datetime.now()
+                    logger.debug("已发送ping心跳")
+                    
+                    # 不等待pong响应，让消息接收循环处理它
+                    # 只需要确保在合理时间内收到任何消息即可
+                    await asyncio.sleep(5)  # 等待5秒
+                    
+                    # 检查是否在发送ping后收到过任何消息
+                    if self.last_message_time:
+                        time_since_ping = (datetime.now() - self.last_ping_time).total_seconds()
+                        if time_since_ping > 10:  # 如果超过10秒没有收到任何消息
+                            logger.warning("超过10秒未收到任何消息，可能需要重连")
+                            await self._handle_disconnect()
+                            break
+                            
+                # 计算下次ping的等待时间
+                next_wait_time = max(5, min(25, self.ping_interval - 5))  # 确保不超过25秒，不少于5秒
+                await asyncio.sleep(next_wait_time)
+                    
+            except asyncio.CancelledError:
+                logger.info("心跳循环已取消")
+                break
             except Exception as e:
                 logger.error(f"发送心跳失败: {e}")
-                await self.reconnect()
+                await self._handle_disconnect()
+                break
                 
     async def _receive_loop(self):
         """消息接收循环"""
-        while self.is_connected:
+        while True:
             try:
+                if not self.is_connected or not self.ws:
+                    await asyncio.sleep(0.1)
+                    continue
+
                 message = await self.ws.recv()
-                # 将消息放入队列
                 await self._message_queue.put(message)
-            except websockets.exceptions.ConnectionClosed:
-                logger.warning("WebSocket连接已关闭")
-                await self.reconnect()
+                self.last_message_time = datetime.now()
+
+            except asyncio.CancelledError:
+                logger.info("消息接收循环已取消")
+                break
+            except websockets.ConnectionClosed:
+                logger.error("WebSocket连接已关闭")
+                await self._handle_disconnect()
                 break
             except Exception as e:
                 logger.error(f"接收消息时发生错误: {e}")
-                await self.reconnect()
-                
+                await self._handle_disconnect()
+                break
+
     async def _process_loop(self):
         """消息处理循环"""
         while True:
             try:
-                # 从队列获取消息
+                # 获取消息
                 message = await self._message_queue.get()
                 
+                # 处理pong响应
+                if message == 'pong':
+                    logger.debug("从队列中处理pong响应")
+                    continue
+                    
+                # 处理JSON消息
                 try:
                     data = json.loads(message)
-                    await self.on_message(data)
-                except json.JSONDecodeError as e:
-                    logger.error(f"解析消息失败: {e}, message={message}")
-                except Exception as e:
-                    logger.error(f"处理消息时发生错误: {e}, message={message}")
-                finally:
-                    self._message_queue.task_done()
                     
+                    # 设置最后接收消息时间
+                    self.last_message_time = datetime.now()
+                    
+                    # 如果是登录响应，更新登录状态
+                    if data.get('event') == 'login':
+                        if data.get('code') == '0':
+                            self.is_logged_in = True
+                        else:
+                            self.is_logged_in = False
+                            logger.error(f"登录失败: {data}")
+                            
+                    # 调用消息处理回调
+                    if callable(self.on_message):
+                        await self.on_message(data)
+                except json.JSONDecodeError:
+                    # 非JSON消息且不是pong（前面已经过滤了pong）
+                    logger.warning(f"收到非JSON消息: {message}")
             except asyncio.CancelledError:
+                logger.info("消息处理循环已取消")
                 break
             except Exception as e:
-                logger.error(f"消息处理循环发生错误: {e}")
-                await asyncio.sleep(1)
+                logger.error(f"处理消息时发生错误: {e}")
                 
     async def _resubscribe(self):
         """重新订阅所有频道"""

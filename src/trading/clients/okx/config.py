@@ -25,9 +25,9 @@ class OKXConfig:
     }
     
     # WebSocket配置
-    WS_PING_INTERVAL = 30  # 心跳间隔（秒）
+    WS_PING_INTERVAL = 25  # 心跳间隔（秒），修改为25秒，确保不超过官方建议的30秒
     WS_RECONNECT_DELAY = 5  # 重连延迟（秒）
-    WS_MAX_RETRIES = 3     # 最大重试次数
+    WS_MAX_RETRIES = 5     # 最大重试次数，增加到5次
     
     # 时间周期映射
     INTERVAL_MAP = {
@@ -63,6 +63,6 @@ class OKXConfig:
         "CANDLE": "candle",
         "ORDERS": "orders",  # 订单频道
         "POSITIONS": "positions",  # 持仓频道
-        "BALANCE": "balance",  # 账户余额频道
+        "BALANCE": "account-balance",  # 账户余额频道，修正为官方API名称
         "ACCOUNT": "account"  # 账户频道
     } 

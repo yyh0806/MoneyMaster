@@ -357,6 +357,59 @@ class OKXClient:
             logger.error(f"获取K线数据失败: {e}")
             return []
             
+    async def get_full_history_kline(self, symbol: str, interval: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None) -> List[OKXCandlestick]:
+        """获取完整的历史K线数据
+        
+        Args:
+            symbol: 交易对
+            interval: K线周期
+            start_time: 开始时间
+            end_time: 结束时间
+            
+        Returns:
+            List[OKXCandlestick]: K线数据列表
+        """
+        try:
+            if interval not in OKXConfig.INTERVAL_MAP:
+                raise OKXValidationError(f"不支持的时间周期: {interval}")
+                
+            # 构建请求参数
+            params = {
+                "instId": symbol,
+                "bar": OKXConfig.INTERVAL_MAP[interval],
+                "limit": "100"  # OKX单次最多返回100条数据
+            }
+            
+            if start_time:
+                params["before"] = str(int(start_time.timestamp() * 1000))
+            if end_time:
+                params["after"] = str(int(end_time.timestamp() * 1000))
+                
+            # 发送请求获取历史数据
+            result = await self._request('GET', '/api/v5/market/history-candles', params=params)
+            
+            # 解析响应数据
+            candlesticks = []
+            for item in result:
+                # OKX返回的数据格式：[timestamp, open, high, low, close, vol, volCcy]
+                candlesticks.append(OKXCandlestick(
+                    symbol=symbol,
+                    interval=interval,
+                    timestamp=datetime.fromtimestamp(int(item[0]) / 1000),
+                    open_price=Decimal(item[1]),
+                    high_price=Decimal(item[2]),
+                    low_price=Decimal(item[3]),
+                    close_price=Decimal(item[4]),
+                    volume=Decimal(item[5]),
+                    quote_volume=Decimal(item[6])
+                ))
+                
+            return candlesticks
+            
+        except Exception as e:
+            logger.error(f"获取历史K线数据失败: {e}")
+            return []
+            
     # 交易方法
     async def place_order(
         self,

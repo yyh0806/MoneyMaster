@@ -141,3 +141,61 @@ class OKXDataParser:
         except (IndexError, ValueError, TypeError) as e:
             logger.error(f"解析K线数据失败: {e}, 数据: {data}")
             raise 
+
+    @staticmethod
+    def parse_balance(data: Dict) -> Dict:
+        """解析账户余额数据
+        
+        Args:
+            data: 账户余额数据，格式为:
+                {
+                    "adjEq": str,
+                    "totalEq": str,
+                    "details": List[Dict]  # 各币种详细信息
+                }
+            
+        Returns:
+            Dict: 账户余额数据字典，格式为:
+                {
+                    "total_equity": str,  # 账户总权益
+                    "balances": {
+                        "BTC": {
+                            "total": str,
+                            "available": str,
+                            "frozen": str
+                        },
+                        ...
+                    }
+                }
+        """
+        try:
+            # 检查数据完整性
+            if "details" not in data:
+                raise ValueError("账户数据缺少details字段")
+                
+            # 解析总权益
+            total_equity = data.get("totalEq", "0")
+            
+            # 解析各币种余额
+            balances = {}
+            for detail in data["details"]:
+                if "ccy" not in detail:
+                    continue
+                    
+                currency = detail["ccy"]
+                balances[currency] = {
+                    "total": str(Decimal(str(detail.get("eq", "0")))),
+                    "available": str(Decimal(str(detail.get("availBal", "0")))),
+                    "frozen": str(Decimal(str(detail.get("frozenBal", "0")))),
+                    "margin": str(Decimal(str(detail.get("marginBal", "0")))),
+                    "debt": str(Decimal(str(detail.get("debtBal", "0"))))
+                }
+                
+            return {
+                "total_equity": total_equity,
+                "balances": balances
+            }
+            
+        except Exception as e:
+            logger.error(f"解析账户余额数据失败: {e}, data={data}")
+            raise 
