@@ -47,6 +47,8 @@ class OKXClient:
         self.api_secret = api_secret
         self.passphrase = passphrase
         self.testnet = testnet
+        self.is_logged_in = False  # 添加登录状态跟踪
+        self.last_login_time = None  # 记录上次登录时间
         
         # REST API基础URL
         self.rest_url = OKXConfig.REST_TESTNET_URL if testnet else OKXConfig.REST_MAINNET_URL
@@ -122,8 +124,62 @@ class OKXClient:
         )
         return base64.b64encode(mac.digest()).decode()
         
+    async def connect(self) -> bool:
+        """连接交易所WebSocket并自动登录"""
+        try:
+            logger.info("正在连接OKX WebSocket并登录...")
+            
+            # 连接WebSocket
+            connected = await self.ws.connect()
+            if not connected:
+                logger.error("WebSocket连接失败")
+                return False
+                
+            # 更新登录状态
+            self.is_logged_in = self.ws.is_logged_in
+            if self.is_logged_in:
+                self.last_login_time = datetime.now()
+                logger.info("OKX WebSocket连接和登录成功")
+            else:
+                logger.warning("OKX WebSocket连接成功，但登录状态未确认")
+                
+            # 订阅基础市场数据
+            await self.subscribe_basic_data()
+            
+            # 如果有API密钥，订阅私有数据
+            if self.is_logged_in and all([self.api_key, self.api_secret, self.passphrase]):
+                await self.subscribe_private_data()
+                
+            return connected
+        except Exception as e:
+            logger.error(f"OKX连接失败: {e}")
+            return False
+            
+    async def ensure_login(self) -> bool:
+        """确保已登录状态
+        
+        如果未登录或登录状态失效，会尝试重新登录
+        
+        Returns:
+            bool: 是否成功确保登录状态
+        """
+        # 检查WebSocket是否已登录
+        if not self.ws.is_connected or not self.ws.is_logged_in:
+            logger.info("检测到未登录状态，正在尝试重新连接和登录...")
+            return await self.connect()
+            
+        # 检查登录时间是否已过期（超过10分钟）
+        if self.last_login_time and (datetime.now() - self.last_login_time).total_seconds() > 600:
+            logger.info("登录状态可能已过期，正在尝试重新登录...")
+            await self.disconnect()
+            return await self.connect()
+            
+        return True
+    
     async def _request(self, method: str, path: str, **kwargs) -> Dict:
         """发送HTTP请求
+        
+        在请求前确保已登录状态
         
         Args:
             method: 请求方法
@@ -133,6 +189,11 @@ class OKXClient:
         Returns:
             Dict: 响应数据
         """
+        # 如果需要API密钥，确保已登录
+        if all([self.api_key, self.api_secret, self.passphrase]):
+            # 确保已登录（WebSocket登录状态会影响一些API的连接状态）
+            await self.ensure_login()
+            
         if not path.startswith('/'):
             path = '/' + path
             
@@ -215,21 +276,6 @@ class OKXClient:
             logger.error(error_msg)
             raise OKXRequestError(error_msg)
             
-    async def connect(self) -> bool:
-        """连接交易所WebSocket"""
-        try:
-            connected = await self.ws.connect()
-            if connected:
-                # 订阅基础市场数据
-                await self.subscribe_basic_data()
-                # 如果有API密钥，订阅私有数据
-                if all([self.api_key, self.api_secret, self.passphrase]):
-                    await self.subscribe_private_data()
-            return connected
-        except Exception as e:
-            logger.error(f"连接失败: {e}")
-            return False
-        
     async def disconnect(self):
         """断开WebSocket连接"""
         await self.ws.disconnect()

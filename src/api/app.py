@@ -64,23 +64,23 @@ async def startup_event():
             app_logger.info("WebSocket连接成功")
             # 预先订阅所有需要的数据
             symbol = okx_client.symbol
-            await okx_client.subscribe_ticker(symbol)
-            await okx_client.subscribe_orderbook(symbol)
-            await okx_client.subscribe_trades(symbol)
+            await okx_client.ws.subscribe_ticker(symbol)
+            await okx_client.ws.subscribe_orderbook(symbol)
+            await okx_client.ws.subscribe_trades(symbol)
             
             # 订阅K线周期
             intervals = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
             for interval in intervals:
                 try:
                     app_logger.info(f"订阅K线数据: {interval}")
-                    await okx_client.subscribe_candlesticks(symbol, interval)
+                    await okx_client.ws.subscribe_candlesticks(symbol, interval)
                     await asyncio.sleep(1)  # 添加延迟，避免请求过快
                 except Exception as e:
                     app_logger.error(f"订阅K线数据失败 {interval}: {e}")
             app_logger.info("市场数据订阅成功")
             
             # 启动消息处理
-            await okx_client.ws_client.start()
+            await okx_client.ws.start()
         else:
             app_logger.error("WebSocket连接失败")
     except Exception as e:
@@ -130,17 +130,11 @@ async def root():
 async def get_balance():
     """获取账户余额"""
     try:
-        balances = await okx_client.get_account_balance()
+        balances = await okx_client.get_balance()
         return {
             "code": "0",
             "msg": "",
             "data": balances
-        }
-    except NotImplementedError as e:
-        return {
-            "code": "1",
-            "msg": str(e),
-            "data": None
         }
     except Exception as e:
         error_msg = f"获取账户余额失败: {e}"
@@ -155,7 +149,7 @@ async def get_balance():
 async def get_market_price(symbol: str):
     """获取市场价格"""
     try:
-        data = await okx_client.get_market_price(symbol)
+        data = await okx_client.get_ticker()
         if data:
             # 确保返回的数据格式正确
             return {
@@ -163,13 +157,13 @@ async def get_market_price(symbol: str):
                 "msg": "",
                 "data": {
                     "symbol": symbol,
-                    "last_price": data.get("last"),
-                    "best_bid": data.get("best_bid"),
-                    "best_ask": data.get("best_ask"),
-                    "volume_24h": data.get("volume_24h"),
-                    "high_24h": data.get("high_24h"),
-                    "low_24h": data.get("low_24h"),
-                    "timestamp": data.get("timestamp")
+                    "last_price": str(data.last_price),
+                    "best_bid": str(data.best_bid),
+                    "best_ask": str(data.best_ask),
+                    "volume_24h": str(data.volume_24h),
+                    "high_24h": str(data.high_24h),
+                    "low_24h": str(data.low_24h),
+                    "timestamp": data.timestamp.isoformat()
                 }
             }
         return {
@@ -190,8 +184,6 @@ async def get_market_price(symbol: str):
 async def get_kline(
     symbol: str, 
     interval: str = "15m",
-    start_time: int = None,
-    end_time: int = None,
     limit: int = 200
 ):
     """获取K线数据
@@ -199,39 +191,18 @@ async def get_kline(
     Args:
         symbol: 交易对
         interval: K线周期，默认15分钟
-        start_time: 开始时间戳（毫秒）
-        end_time: 结束时间戳（毫秒）
         limit: 返回的K线数量限制，默认200
         
     Returns:
         返回指定时间范围内的K线数据
     """
     try:
-        app_logger.info(f"请求K线数据: symbol={symbol}, interval={interval}, start_time={start_time}, end_time={end_time}, limit={limit}")
-        
-        # 如果没有指定时间范围，使用默认的时间范围
-        if not end_time:
-            end_time = int(datetime.now().timestamp() * 1000)
-            
-        if not start_time:
-            # 根据interval和limit计算默认的start_time
-            period_map = {
-                "1m": 60,
-                "5m": 300,
-                "15m": 900,
-                "1H": 3600,
-                "4H": 14400,
-                "1D": 86400
-            }
-            period_seconds = period_map.get(interval, 900)  # 默认15分钟
-            start_time = end_time - (period_seconds * limit * 1000)
+        app_logger.info(f"请求K线数据: symbol={symbol}, interval={interval}, limit={limit}")
         
         # 获取K线数据
         candlesticks = await okx_client.get_candlesticks(
             symbol, 
             interval,
-            start_time=start_time,
-            end_time=end_time,
             limit=limit
         )
         

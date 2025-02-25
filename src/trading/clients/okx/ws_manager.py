@@ -6,9 +6,12 @@ import websockets
 from datetime import datetime
 from typing import Optional, Callable, Dict, Any, List
 from loguru import logger
+import hmac
+import base64
+import requests
 
 from .config import OKXConfig
-from .exceptions import OKXWebSocketError, OKXConnectionError
+from .exceptions import OKXWebSocketError, OKXConnectionError, OKXAuthenticationError
 
 class OKXWebSocketManager:
     """OKX WebSocket连接管理器"""
@@ -43,6 +46,7 @@ class OKXWebSocketManager:
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.is_connected = False
         self.should_reconnect = True
+        self.is_logged_in = False  # 添加登录状态跟踪
         
         self._ping_task: Optional[asyncio.Task] = None
         self._receive_task: Optional[asyncio.Task] = None
@@ -53,11 +57,169 @@ class OKXWebSocketManager:
         self._message_queue: asyncio.Queue = asyncio.Queue()
         self._process_task: Optional[asyncio.Task] = None
         
+    def _get_timestamp(self) -> str:
+        """获取符合OKX要求的时间戳格式
+        
+        返回整数格式的Unix时间戳，单位为秒
+        """
+        # OKX要求的格式是整数格式的Unix时间戳（秒）
+        now = int(datetime.utcnow().timestamp())
+        return str(now)
+        
+    def _sign(self, timestamp: str, method: str, request_path: str, body: str = '') -> str:
+        """生成签名
+        
+        Args:
+            timestamp: 整数格式的Unix时间戳（秒）
+            method: 请求方法 (GET/POST)
+            request_path: 请求路径
+            body: 请求体
+            
+        Returns:
+            str: Base64编码的签名
+        """
+        if not self.api_secret:
+            raise OKXAuthenticationError("缺少API密钥")
+            
+        message = timestamp + method + request_path + (body or '')
+        mac = hmac.new(
+            bytes(self.api_secret, encoding='utf8'),
+            bytes(message, encoding='utf-8'),
+            digestmod='sha256'
+        )
+        d = mac.digest()
+        return base64.b64encode(d).decode('utf-8')
+        
+    async def login(self) -> bool:
+        """WebSocket API登录
+        
+        Returns:
+            bool: 登录是否成功
+        """
+        # 如果已经登录成功，直接返回
+        if self.is_logged_in:
+            logger.info("已经登录，跳过重复登录")
+            return True
+            
+        if not all([self.api_key, self.api_secret, self.passphrase]):
+            logger.warning("缺少API密钥，跳过登录")
+            return False
+            
+        try:
+            # 获取服务器时间（如果失败会返回本地时间）
+            server_time = self._get_server_time()
+            logger.info(f"使用登录时间戳: {server_time}")
+            
+            # 准备登录参数
+            sign = self._sign(server_time, 'GET', '/users/self/verify')
+            
+            # 构建登录消息，确保格式与示例完全匹配
+            login_message = {
+                "op": "login",
+                "args": [{
+                    "apiKey": self.api_key,
+                    "passphrase": self.passphrase,
+                    "timestamp": server_time,
+                    "sign": sign
+                }]
+            }
+            
+            # 发送登录请求
+            await self.send(login_message)
+            logger.info("WebSocket登录请求已发送")
+            
+            # 等待登录响应
+            for _ in range(5):  # 最多等待5秒
+                try:
+                    message = await asyncio.wait_for(self.ws.recv(), timeout=1.0)
+                    data = json.loads(message)
+                    
+                    # 检查登录响应
+                    if data.get('event') == 'login':
+                        if data.get('code') == '0':
+                            logger.info("WebSocket登录成功")
+                            self.is_logged_in = True  # 标记登录成功
+                            return True
+                        else:
+                            logger.error(f"WebSocket登录失败: {data}")
+                            return False
+                    elif data.get('event') == 'error':
+                        logger.error(f"WebSocket登录错误: {data}")
+                        return False
+                        
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.error(f"处理登录响应时发生错误: {e}")
+                    return False
+                    
+            logger.error("WebSocket登录超时")
+            return False
+            
+        except Exception as e:
+            logger.error(f"WebSocket登录失败: {e}")
+            return False
+            
+    def _get_server_time(self) -> str:
+        """从OKX REST API获取服务器时间
+        
+        Returns:
+            str: 服务器时间（Unix时间戳，单位秒）
+        """
+        try:
+            # 使用OKX时间同步API
+            endpoints = [
+                'https://www.okx.com/api/v5/public/time',
+                'https://aws.okx.com/api/v5/public/time'  # 备用API
+            ]
+            
+            headers = {
+                'User-Agent': 'OKX-Python-SDK',
+                'Accept': 'application/json'
+            }
+            
+            for endpoint in endpoints:
+                try:
+                    response = requests.get(
+                        endpoint, 
+                        headers=headers,
+                        timeout=3,
+                        verify=True
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('code') == '0' and 'data' in data:
+                            # 返回Unix时间戳（秒）
+                            ts = data['data'][0]['ts']
+                            # 从毫秒转换为秒
+                            timestamp = str(int(int(ts) / 1000))
+                            return timestamp
+                except Exception as e:
+                    logger.warning(f"尝试获取服务器时间失败 ({endpoint}): {e}")
+                    continue
+                    
+            # 如果所有API端点都失败，则获取本地时间
+            logger.warning("所有API端点获取服务器时间都失败，使用本地时间")
+            return self._get_timestamp()
+        except Exception as e:
+            logger.error(f"获取服务器时间失败: {e}")
+            # 返回本地时间作为后备
+            return self._get_timestamp()
+        
     async def connect(self) -> bool:
         """建立WebSocket连接"""
         try:
             self.ws = await websockets.connect(self.url)
             self.is_connected = True
+            
+            # 如果有API密钥，先进行登录
+            if all([self.api_key, self.api_secret, self.passphrase]):
+                login_success = await self.login()
+                if not login_success:
+                    logger.error("WebSocket登录失败，断开连接")
+                    await self.disconnect()
+                    return False
             
             # 启动心跳和消息处理任务
             self._ping_task = asyncio.create_task(self._ping_loop())
@@ -79,6 +241,7 @@ class OKXWebSocketManager:
         """断开WebSocket连接"""
         self.should_reconnect = False
         self.is_connected = False
+        self.is_logged_in = False  # 重置登录状态
         
         # 取消所有任务
         for task in [self._ping_task, self._receive_task, self._process_task]:

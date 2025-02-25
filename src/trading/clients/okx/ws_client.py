@@ -515,8 +515,12 @@ class OKXWebSocketClient:
             symbol: 交易对
             interval: K线周期
         """
-        await self._ws_public.subscribe("candle", [{
-            "channel": f"candle{interval}",
+        if interval not in OKXConfig.INTERVAL_MAP:
+            raise OKXValidationError(f"不支持的时间周期: {interval}")
+            
+        channel = f"candle{interval}"
+        await self._ws_public.subscribe(channel, [{
+            "channel": channel,
             "instId": symbol
         }])
 
