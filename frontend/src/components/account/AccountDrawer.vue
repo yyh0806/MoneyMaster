@@ -28,7 +28,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import { ArrowRight } from '@element-plus/icons-vue';
 import { formatBalance } from '@/utils/formatters';
 
@@ -38,16 +38,29 @@ const accountBalances = ref<Record<string, number>>({});
 // 获取账户余额的方法
 const fetchAccountBalances = async () => {
   try {
-    const response = await fetch('/api/account/balances');
-    const data = await response.json();
-    accountBalances.value = data;
+    const response = await fetch('/api/account/balance');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const result = await response.json();
+    if (result.code === "0" && result.data) {
+      accountBalances.value = result.data;
+    } else {
+      console.error('获取账户余额失败:', result.msg);
+    }
   } catch (error) {
     console.error('获取账户余额失败:', error);
   }
 };
 
-// 组件挂载时获取余额
+// 组件挂载时获取余额并定时更新
 fetchAccountBalances();
+const timer = setInterval(fetchAccountBalances, 5000);
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  clearInterval(timer);
+});
 </script>
 
 <style scoped>

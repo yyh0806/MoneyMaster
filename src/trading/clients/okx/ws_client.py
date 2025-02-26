@@ -6,6 +6,11 @@ from loguru import logger
 import json
 import websockets
 import asyncio
+import aiohttp
+import hmac
+import base64
+import ssl
+from aiohttp import ClientTimeout
 
 from .parsers import OKXDataParser
 from .config import OKXConfig
@@ -25,7 +30,7 @@ class OKXWebSocketClient:
     """OKX WebSocket客户端"""
     
     def __init__(self, 
-                 symbol: str, 
+                 symbol: str,
                  api_key: Optional[str] = None,
                  api_secret: Optional[str] = None,
                  passphrase: Optional[str] = None,
@@ -43,33 +48,27 @@ class OKXWebSocketClient:
         self.api_key = api_key
         self.api_secret = api_secret
         self.passphrase = passphrase
+        self.testnet = testnet
+        
+        # WebSocket URLs
+        self.public_url = OKXConfig.WS_PUBLIC_TESTNET_URL if testnet else OKXConfig.WS_PUBLIC_MAINNET_URL
+        self.private_url = OKXConfig.WS_PRIVATE_TESTNET_URL if testnet else OKXConfig.WS_PRIVATE_MAINNET_URL
+        
+        # 连接状态
+        self.is_connected = False
+        self.is_logged_in = False
+        
+        # WebSocket连接
+        self.public_ws = None
+        self.private_ws = None
+        
+        # 心跳定时器
+        self.ping_task = None
+        
+        # 数据处理回调
+        self.callbacks = {}
+        
         self.parser = OKXDataParser()
-        self.is_logged_in = False  # 添加登录状态跟踪
-        
-        # 创建WebSocket管理器
-        self._ws_public = OKXWebSocketManager(
-            url=OKXConfig.WS_PUBLIC_TESTNET if testnet else OKXConfig.WS_PUBLIC_MAINNET,
-            on_message=self._handle_public_message,
-            api_key=api_key,
-            api_secret=api_secret,
-            passphrase=passphrase
-        )
-        
-        self._ws_private = OKXWebSocketManager(
-            url=OKXConfig.WS_PRIVATE_TESTNET if testnet else OKXConfig.WS_PRIVATE_MAINNET,
-            on_message=self._handle_private_message,
-            api_key=api_key,
-            api_secret=api_secret,
-            passphrase=passphrase
-        )
-        
-        self._ws_business = OKXWebSocketManager(
-            url=OKXConfig.WS_BUSINESS_TESTNET if testnet else OKXConfig.WS_BUSINESS_MAINNET,
-            on_message=self._handle_business_message,
-            api_key=api_key,
-            api_secret=api_secret,
-            passphrase=passphrase
-        )
         
         # 存储最新数据
         self._orderbook: Optional[OKXOrderBook] = None
@@ -80,22 +79,23 @@ class OKXWebSocketClient:
     async def connect(self) -> bool:
         """连接WebSocket"""
         try:
-            public_connected = await self._ws_public.connect()
-            private_connected = await self._ws_private.connect()
-            business_connected = await self._ws_business.connect()
-            self.is_logged_in = public_connected and private_connected and business_connected
+            self.public_ws = await websockets.connect(self.public_url)
+            self.private_ws = await websockets.connect(self.private_url)
+            self.is_logged_in = True
+            self.is_connected = True
             return self.is_logged_in
         except Exception as e:
             logger.error(f"WebSocket连接失败: {e}")
             self.is_logged_in = False
+            self.is_connected = False
             return False
             
     async def disconnect(self):
         """断开WebSocket连接"""
-        await self._ws_public.disconnect()
-        await self._ws_private.disconnect()
-        await self._ws_business.disconnect()
+        await self.public_ws.close()
+        await self.private_ws.close()
         self.is_logged_in = False
+        self.is_connected = False
         
     async def _handle_public_message(self, message: Dict):
         """处理公共频道消息"""
@@ -271,20 +271,27 @@ class OKXWebSocketClient:
         """订阅基础市场数据"""
         try:
             # 使用一次性订阅多个频道的方式，避免重复订阅
-            await self._ws_public.subscribe("", [
-                {
+            await self._handle_subscription_message({
+                "event": "subscribe",
+                "arg": {
                     "channel": "tickers",
                     "instId": self.symbol
-                },
-                {
+                }
+            })
+            await self._handle_subscription_message({
+                "event": "subscribe",
+                "arg": {
                     "channel": "books",
                     "instId": self.symbol
-                },
-                {
+                }
+            })
+            await self._handle_subscription_message({
+                "event": "subscribe",
+                "arg": {
                     "channel": "trades",
                     "instId": self.symbol
                 }
-            ])
+            })
         except Exception as e:
             logger.error(f"订阅基础数据失败: {e}")
             
@@ -314,56 +321,74 @@ class OKXWebSocketClient:
         """订阅Ticker数据"""
         if symbol != self.symbol:
             raise OKXValidationError(f"符号不匹配: {symbol} != {self.symbol}")
-        await self._ws_public.subscribe("tickers", [{
-            "channel": "tickers",
-            "instId": symbol
-        }])
+        await self._handle_subscription_message({
+            "event": "subscribe",
+            "arg": {
+                "channel": "tickers",
+                "instId": symbol
+            }
+        })
         
     async def subscribe_trades(self, symbol: str):
         """订阅成交数据"""
         if symbol != self.symbol:
             raise OKXValidationError(f"符号不匹配: {symbol} != {self.symbol}")
-        await self._ws_public.subscribe("trades", [{
-            "channel": "trades",
-            "instId": symbol
-        }])
+        await self._handle_subscription_message({
+            "event": "subscribe",
+            "arg": {
+                "channel": "trades",
+                "instId": symbol
+            }
+        })
         
     async def subscribe_orderbook(self, symbol: str):
         """订阅订单簿数据"""
         if symbol != self.symbol:
             raise OKXValidationError(f"符号不匹配: {symbol} != {self.symbol}")
-        await self._ws_public.subscribe("books", [{
-            "channel": "books",
-            "instId": symbol
-        }])
+        await self._handle_subscription_message({
+            "event": "subscribe",
+            "arg": {
+                "channel": "books",
+                "instId": symbol
+            }
+        })
         
     async def subscribe_orders(self, symbol: str):
         """订阅订单更新"""
         if not all([self.api_key, self.api_secret, self.passphrase]):
             raise OKXAuthenticationError("订阅订单需要API密钥")
-        await self._ws_private.subscribe(OKXConfig.TOPICS["ORDERS"], [{
-            "channel": OKXConfig.TOPICS["ORDERS"],
-            "instType": "SPOT",
-            "instId": symbol,
-            "algoId": ""
-        }])
+        await self._handle_subscription_message({
+            "event": "subscribe",
+            "arg": {
+                "channel": OKXConfig.TOPICS["ORDERS"],
+                "instType": "SPOT",
+                "instId": symbol,
+                "algoId": ""
+            }
+        })
         
     async def subscribe_balance(self):
         """订阅账户余额更新"""
         if not all([self.api_key, self.api_secret, self.passphrase]):
             raise OKXAuthenticationError("订阅余额需要API密钥")
-        await self._ws_private.subscribe(OKXConfig.TOPICS["ACCOUNT"], [{
-            "channel": OKXConfig.TOPICS["ACCOUNT"]
-        }])
+        await self._handle_subscription_message({
+            "event": "subscribe",
+            "arg": {
+                "channel": OKXConfig.TOPICS["ACCOUNT"]
+            }
+        })
         
     async def subscribe_account(self):
         """订阅账户信息更新"""
         if not all([self.api_key, self.api_secret, self.passphrase]):
             raise OKXAuthenticationError("订阅账户信息需要API密钥")
-        await self._ws_private.subscribe(OKXConfig.TOPICS["ACCOUNT"], [{
-            "channel": OKXConfig.TOPICS["ACCOUNT"],
-            "ccy": ["BTC","USDT"]
-        }])
+        await self._handle_subscription_message({
+            "event": "subscribe",
+            "arg": {
+                "channel": OKXConfig.TOPICS["ACCOUNT"],
+                "ccy": ["BTC","USDT"]
+            }
+        })
         
     async def get_orderbook(self, symbol: str) -> Optional[OKXOrderBook]:
         """获取订单簿"""
@@ -453,9 +478,21 @@ class OKXWebSocketClient:
         """实际的订阅操作"""
         try:
             if channel.startswith(OKXConfig.TOPICS["CANDLE"]):
-                await self._ws_business.subscribe(channel, kwargs)
+                await self._handle_subscription_message({
+                    "event": "subscribe",
+                    "arg": {
+                        "channel": channel,
+                        **kwargs
+                    }
+                })
             else:
-                await self._ws_public.subscribe(channel, kwargs)
+                await self._handle_subscription_message({
+                    "event": "subscribe",
+                    "arg": {
+                        "channel": channel,
+                        **kwargs
+                    }
+                })
         except Exception as e:
             logger.error(f"订阅失败: channel={channel}, kwargs={kwargs}, error={e}")
             raise
@@ -464,9 +501,21 @@ class OKXWebSocketClient:
         """实际的取消订阅操作"""
         try:
             if channel.startswith(OKXConfig.TOPICS["CANDLE"]):
-                await self._ws_business.unsubscribe(channel, kwargs)
+                await self._handle_subscription_message({
+                    "event": "unsubscribe",
+                    "arg": {
+                        "channel": channel,
+                        **kwargs
+                    }
+                })
             else:
-                await self._ws_public.unsubscribe(channel, kwargs)
+                await self._handle_subscription_message({
+                    "event": "unsubscribe",
+                    "arg": {
+                        "channel": channel,
+                        **kwargs
+                    }
+                })
         except Exception as e:
             logger.error(f"取消订阅失败: channel={channel}, kwargs={kwargs}, error={e}")
             raise
@@ -536,10 +585,13 @@ class OKXWebSocketClient:
             raise OKXValidationError(f"不支持的时间周期: {interval}")
             
         channel = f"{OKXConfig.TOPICS['CANDLE']}{OKXConfig.INTERVAL_MAP[interval]}"
-        await self._ws_business.subscribe(channel, [{
-            "channel": channel,
-            "instId": symbol
-        }])
+        await self._handle_subscription_message({
+            "event": "subscribe",
+            "arg": {
+                "channel": channel,
+                "instId": symbol
+            }
+        })
 
     async def _handle_private_message(self, message: Dict):
         """处理私有频道消息"""
@@ -573,14 +625,18 @@ class OKXWebSocketClient:
                 balance_data = data[0]  # 获取第一个数据项
                 balance = self.parser.parse_balance(balance_data)
                 
-                # 遍历所有币种余额并记录
-                for currency, details in balance["balances"].items():
-                    logger.info(f"账户余额更新: {currency}, "
-                              f"总额: {details['total']}, "
-                              f"可用: {details['available']}, "
-                              f"冻结: {details['frozen']}")
-                
-                logger.info(f"账户总权益: {balance['total_equity']}")
+                # 只记录总权益的变化
+                total_equity = Decimal(str(balance.get('total_equity', '0')))  # 确保转换为Decimal
+                if hasattr(self, '_last_total_equity'):
+                    if isinstance(self._last_total_equity, (int, float, str)):
+                        self._last_total_equity = Decimal(str(self._last_total_equity))
+                    change = abs((total_equity - self._last_total_equity) / self._last_total_equity)
+                    if change > Decimal('0.001'):  # 0.1%的变化阈值
+                        logger.info(f"账户总权益: {float(total_equity):,.2f} USDT")  # 转换为float后格式化
+                else:
+                    logger.info(f"账户总权益: {float(total_equity):,.2f} USDT")  # 转换为float后格式化
+                    
+                self._last_total_equity = total_equity
                 
         except Exception as e:
             logger.error(f"处理账户更新失败: {e}")
@@ -596,15 +652,38 @@ class OKXWebSocketClient:
         return 
 
     async def _handle_balance(self, data: Dict):
-        """处理账户余额更新
-        
-        Args:
-            data: 账户余额数据
-        """
+        """处理账户余额更新"""
         try:
-            balance = self.parser.parse_balance(data)
-            if callable(self.on_balance):
-                await self.on_balance(balance)
+            total_equity = Decimal('0')
+            balances = {}
+            
+            for item in data.get('details', []):
+                currency = item['ccy']
+                balance = OKXBalance(
+                    currency=currency,
+                    total=Decimal(item['cashBal']),
+                    available=Decimal(item['availBal']),
+                    frozen=Decimal(item['frozenBal'])
+                )
+                balances[currency] = balance
+                
+                # 计算总权益
+                if currency == 'USDT':
+                    total_equity += balance.total
+                elif currency == 'BTC':
+                    total_equity += balance.total * Decimal(data.get('btcPrice', '0'))
+                    
+            # 只在总权益发生显著变化时才记录日志
+            if hasattr(self, '_last_total_equity'):
+                change = abs((total_equity - self._last_total_equity) / self._last_total_equity)
+                if change > Decimal('0.001'):  # 0.1%的变化阈值
+                    logger.info(f"账户总权益: {total_equity:,.2f} USDT")
+            else:
+                logger.info(f"账户总权益: {total_equity:,.2f} USDT")
+                
+            self._last_total_equity = total_equity
+            return balances
+            
         except Exception as e:
-            logger.error(f"处理账户更新失败: {e}")
-            raise 
+            logger.error(f"处理账户余额更新失败: {e}")
+            return {} 

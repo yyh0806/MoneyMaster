@@ -17,7 +17,7 @@ TESTNET_API_URL = 'https://www.okx.com/api/v5'  # 模拟盘API地址
 USE_TESTNET = os.getenv('USE_TESTNET', 'true').lower() == 'true'
 
 # 代理配置
-USE_PROXY = True  # 启用代理
+USE_PROXY = False  # 禁用代理
 HTTP_PROXY = 'http://127.0.0.1:7890'
 HTTPS_PROXY = 'http://127.0.0.1:7890'
 

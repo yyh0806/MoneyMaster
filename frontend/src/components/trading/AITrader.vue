@@ -96,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import { InfoFilled } from '@element-plus/icons-vue';
 import type { Analysis, StrategyState } from '@/types/trading';
 import TradeStatus from './TradeStatus.vue';
@@ -195,12 +195,27 @@ const fetchStrategyState = async () => {
       fetch('/api/strategy/state'),
       fetch('/api/strategy/analysis')
     ]);
-    const [stateData, analysisData] = await Promise.all([
+    
+    if (!stateResponse.ok || !analysisResponse.ok) {
+      throw new Error(`HTTP error! status: ${stateResponse.status}, ${analysisResponse.status}`);
+    }
+    
+    const [stateResult, analysisResult] = await Promise.all([
       stateResponse.json(),
       analysisResponse.json()
     ]);
-    strategyState.value = stateData;
-    analysis.value = analysisData;
+    
+    if (stateResult.code === "0" && stateResult.data) {
+      strategyState.value = stateResult.data;
+    } else {
+      console.error('获取策略状态失败:', stateResult.msg);
+    }
+    
+    if (analysisResult.code === "0" && analysisResult.data) {
+      analysis.value = analysisResult.data;
+    } else {
+      console.error('获取策略分析失败:', analysisResult.msg);
+    }
   } catch (error) {
     console.error('获取策略状态失败:', error);
   }
@@ -208,7 +223,12 @@ const fetchStrategyState = async () => {
 
 // 初始化和定时更新
 fetchStrategyState();
-setInterval(fetchStrategyState, 5000);
+const timer = setInterval(fetchStrategyState, 5000);
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  clearInterval(timer);
+});
 </script>
 
 <style scoped>

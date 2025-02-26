@@ -8,7 +8,13 @@
         </el-select>
       </div>
     </template>
-    <div class="price-info">
+    <div v-if="loading" class="loading-state">
+      <el-skeleton :rows="3" animated />
+    </div>
+    <div v-else-if="error" class="error-state">
+      <el-alert type="error" :title="error" :closable="false" />
+    </div>
+    <div v-else class="price-info">
       <div class="latest-price">
         <span class="label">最新价格:</span>
         <span class="value" :class="priceChangeClass">{{ formatPrice(marketData.last_price) }}</span>
@@ -32,14 +38,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import type { MarketData } from '@/types/trading';
 import { formatPrice, formatQuantity } from '@/utils/formatters';
 
 const symbols = ['BTC-USDT', 'ETH-USDT', 'BNB-USDT', 'XRP-USDT', 'ADA-USDT'];
 const symbol = ref('BTC-USDT');
 const marketData = ref<MarketData>({});
+const loading = ref(true);
+const error = ref<string | null>(null);
 let prevPrice = ref<number | undefined>(undefined);
+let isInitialLoad = ref(true);
 
 const priceChangeClass = computed(() => {
   if (!prevPrice.value || !marketData.value.last_price) return '';
@@ -52,33 +61,67 @@ const handleSymbolChange = (newSymbol: string) => {
 };
 
 const fetchMarketData = async () => {
+  if (isInitialLoad.value) {
+    loading.value = true;
+  }
+  error.value = null;
+  
   try {
-    const response = await fetch(`/api/market/data/${symbol.value}`);
-    const data = await response.json();
-    prevPrice.value = marketData.value.last_price;
-    marketData.value = data;
-  } catch (error) {
-    console.error('获取市场数据失败:', error);
+    const response = await fetch(`/api/market/price/${symbol.value}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const result = await response.json();
+    
+    if (result.code === "0" && result.data && result.data.length > 0) {
+      prevPrice.value = marketData.value.last_price ? Number(marketData.value.last_price) : undefined;
+      const data = result.data[0];
+      marketData.value = {
+        last_price: Number(data.last_price || data.last || 0),
+        high_24h: Number(data.high_24h || 0),
+        low_24h: Number(data.low_24h || 0),
+        volume_24h: Number(data.volume_24h || 0)
+      };
+    } else {
+      error.value = result.msg || '获取数据失败';
+    }
+  } catch (err) {
+    console.error('获取市场数据失败:', err);
+    error.value = '获取市场数据失败';
+  } finally {
+    if (isInitialLoad.value) {
+      loading.value = false;
+      isInitialLoad.value = false;
+    }
   }
 };
 
 // 初始加载和定时更新
 fetchMarketData();
-setInterval(fetchMarketData, 5000);
+const timer = setInterval(fetchMarketData, 5000);
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  clearInterval(timer);
+});
 </script>
 
 <style scoped>
 .market-data {
   height: 100%;
+  background-color: var(--el-bg-color);
+  color: var(--el-text-color-primary);
 }
 
 .card-header {
   display: flex;
   align-items: center;
+  background-color: var(--el-bg-color);
 }
 
 .price-info {
   padding: 16px 0;
+  background-color: var(--el-bg-color);
 }
 
 .latest-price {
@@ -103,6 +146,7 @@ setInterval(fetchMarketData, 5000);
 
 .value {
   font-weight: bold;
+  color: var(--el-text-color-primary);
 }
 
 .price-up {
@@ -111,5 +155,15 @@ setInterval(fetchMarketData, 5000);
 
 .price-down {
   color: #f56c6c;
+}
+
+.loading-state {
+  padding: 16px 0;
+  background-color: var(--el-bg-color);
+}
+
+.error-state {
+  padding: 16px 0;
+  background-color: var(--el-bg-color);
 }
 </style> 

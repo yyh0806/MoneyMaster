@@ -199,20 +199,19 @@ class OKXClient:
             
         # 构建完整URL
         url = self.rest_url + path
-        logger.debug(f"1. 请求URL: {url}")
+        logger.debug(f"请求URL: {url}")
         
         # 准备请求数据
         data = kwargs.pop('data', {}) if 'data' in kwargs else {}
-        logger.debug(f"6. 请求体: {data}")
+        params = kwargs.pop('params', {}) if 'params' in kwargs else {}
+        logger.debug(f"请求参数: data={data}, params={params}")
         
         # 添加签名
         timestamp = self._get_timestamp()
-        logger.debug(f"3. 时间戳: {timestamp}")
         
         # 生成签名
         data_str = json.dumps(data) if data else ''
         sign = self._sign(timestamp, method, path, data_str)
-        logger.debug(f"4. 签名信息: message={timestamp + method + path + data_str}, sign={sign}")
         
         # 设置请求头
         headers = {
@@ -227,13 +226,10 @@ class OKXClient:
         if self.testnet:
             headers['x-simulated-trading'] = '1'
         
-        logger.debug(f"5. 请求头: {headers}")
-        
         # 设置代理
         proxy = None
         if self.use_proxy:
             proxy = self.proxies['https']
-        logger.debug(f"2. 代理设置: use_proxy={self.use_proxy}, proxy={proxy}")
         
         try:
             session = await self._ensure_session()
@@ -241,19 +237,25 @@ class OKXClient:
             if method.upper() == 'GET':
                 async with session.get(
                     url,
-                    params=data,
+                    params=params,
                     headers=headers,
                     proxy=proxy,
                     verify_ssl=False
                 ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"请求失败: status={response.status}, error={error_text}")
+                        raise OKXRequestError(f"HTTP {response.status}: {error_text}")
+                        
                     result = await response.json()
-                    if result.get('code') == '0':
-                        return result.get('data', [])
-                    else:
-                        error_msg = f"API请求失败: {result}"
-                        logger.error(error_msg)
-                        raise OKXRequestError(error_msg)
-            else:
+                    if result.get('code') != '0':
+                        error_msg = result.get('msg', 'Unknown error')
+                        logger.error(f"API返回错误: code={result.get('code')}, msg={error_msg}")
+                        raise OKXError(f"API Error: {error_msg}")
+                        
+                    return result
+                    
+            elif method.upper() == 'POST':
                 async with session.post(
                     url,
                     json=data,
@@ -261,20 +263,31 @@ class OKXClient:
                     proxy=proxy,
                     verify_ssl=False
                 ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"请求失败: status={response.status}, error={error_text}")
+                        raise OKXRequestError(f"HTTP {response.status}: {error_text}")
+                        
                     result = await response.json()
-                    if result.get('code') == '0':
-                        return result.get('data', [])
-                    else:
-                        error_msg = f"API请求失败: {result}"
-                        logger.error(error_msg)
-                        raise OKXRequestError(error_msg)
+                    if result.get('code') != '0':
+                        error_msg = result.get('msg', 'Unknown error')
+                        logger.error(f"API返回错误: code={result.get('code')}, msg={error_msg}")
+                        raise OKXError(f"API Error: {error_msg}")
+                        
+                    return result
                     
-        except OKXRequestError:
-            raise
+            else:
+                raise ValueError(f"不支持的HTTP方法: {method}")
+                
+        except aiohttp.ClientError as e:
+            logger.error(f"HTTP请求错误: {str(e)}")
+            raise OKXRequestError(f"HTTP请求错误: {str(e)}")
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON解析错误: {str(e)}")
+            raise OKXRequestError(f"JSON解析错误: {str(e)}")
         except Exception as e:
-            error_msg = f"请求异常: {str(e)}"
-            logger.error(error_msg)
-            raise OKXRequestError(error_msg)
+            logger.error(f"请求异常: {str(e)}")
+            raise OKXRequestError(f"请求异常: {str(e)}")
             
     async def disconnect(self):
         """断开WebSocket连接"""
@@ -312,13 +325,38 @@ class OKXClient:
             raise
             
     # 市场数据方法
-    async def get_ticker(self) -> Optional[OKXTicker]:
-        """获取Ticker数据"""
+    async def get_ticker(self) -> Dict:
+        """获取市场行情数据"""
         try:
-            return await self.ws.get_ticker(self.symbol)
+            response = await self._request('GET', '/api/v5/market/ticker', params={'instId': self.symbol})
+            if not response or 'data' not in response:
+                logger.error("获取市场行情响应格式错误")
+                return {}
+                
+            data = response['data']
+            if not data or not isinstance(data, list) or len(data) == 0:
+                logger.warning("市场行情数据为空")
+                return {}
+                
+            # OKX返回的是一个列表，我们取第一个数据
+            ticker_data = data[0]
+            
+            # 格式化数据
+            return {
+                'symbol': self.symbol,
+                'last': ticker_data.get('last', '0'),
+                'last_price': ticker_data.get('last', '0'),
+                'best_bid': ticker_data.get('bidPx', '0'),
+                'best_ask': ticker_data.get('askPx', '0'),
+                'volume_24h': ticker_data.get('vol24h', '0'),
+                'high_24h': ticker_data.get('high24h', '0'),
+                'low_24h': ticker_data.get('low24h', '0'),
+                'open_24h': ticker_data.get('open24h', '0'),
+                'timestamp': datetime.fromtimestamp(int(ticker_data.get('ts', '0')) / 1000).isoformat()
+            }
         except Exception as e:
-            logger.error(f"获取Ticker数据失败: {e}")
-            return None
+            logger.error(f"获取市场行情失败: {str(e)}")
+            return {}
             
     async def get_orderbook(self) -> Optional[OKXOrderBook]:
         """获取订单簿数据"""
@@ -542,18 +580,42 @@ class OKXClient:
             raise OKXAuthenticationError("获取余额需要API密钥")
             
         try:
-            result = await self._request('GET', '/api/v5/account/balance')
+            response = await self._request('GET', '/api/v5/account/balance')
+            if not response or 'data' not in response:
+                logger.error("获取账户余额响应格式错误")
+                return {}
+                
             balances = {}
-            if result:
-                for item in result:
-                    currency = item['ccy']
-                    balances[currency] = OKXBalance(
-                        currency=currency,
-                        total=Decimal(item['bal']),
-                        available=Decimal(item['availBal']),
-                        frozen=Decimal(item['frozenBal'])
-                    )
+            data = response['data']
+            if not data or not isinstance(data, list) or len(data) == 0:
+                logger.warning("账户余额数据为空")
+                return {}
+                
+            # OKX返回的是一个列表，我们取第一个账户的数据
+            account_data = data[0]
+            if 'details' not in account_data:
+                logger.error("账户数据格式错误")
+                return {}
+                
+            # 处理每个币种的余额
+            for detail in account_data['details']:
+                try:
+                    currency = detail['ccy']
+                    balances[currency] = {
+                        'total_equity': detail.get('eq', '0'),
+                        'available_balance': detail.get('availBal', '0'),
+                        'position_margin': detail.get('frozenBal', '0'),
+                        'order_margin': detail.get('ordFrozen', '0'),
+                        'unrealized_pnl': detail.get('upl', '0'),
+                        'margin_ratio': detail.get('mgnRatio', '0'),
+                        'maint_margin_ratio': detail.get('mmr', '0'),
+                        'initial_margin_ratio': detail.get('imr', '0')
+                    }
+                except Exception as e:
+                    logger.error(f"处理币种{currency}余额数据失败: {str(e)}")
+                    continue
+                    
             return balances
         except Exception as e:
-            logger.error(f"获取账户余额失败: {e}")
+            logger.error(f"获取账户余额失败: {str(e)}")
             return {} 

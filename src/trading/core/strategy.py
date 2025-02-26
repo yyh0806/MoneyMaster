@@ -23,16 +23,56 @@ logger.add(
 class EventBus:
     def __init__(self):
         self.subscribers = []
+        self.logger = logger.bind(name="EventBus")
 
     async def publish(self, event_type: str, data: dict):
-        for subscriber in self.subscribers:
-            try:
-                await subscriber(event_type, data)
-            except Exception as e:
-                logger.error(f"事件处理错误: {e}")
+        """发布事件（确保数据可序列化）"""
+        try:
+            # 序列化数据
+            serialized_data = self._serialize_data(data)
+            
+            # 发布事件
+            for subscriber in self.subscribers:
+                try:
+                    await subscriber(event_type, serialized_data)
+                except Exception as e:
+                    self.logger.error(f"事件处理错误: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"发布事件失败: {str(e)}")
 
     def subscribe(self, callback):
-        self.subscribers.append(callback)
+        """订阅事件"""
+        if callback not in self.subscribers:
+            self.subscribers.append(callback)
+            self.logger.info(f"新增订阅者: {callback.__name__}")
+
+    def unsubscribe(self, callback):
+        """取消订阅"""
+        if callback in self.subscribers:
+            self.subscribers.remove(callback)
+            self.logger.info(f"移除订阅者: {callback.__name__}")
+
+    def _serialize_data(self, data: dict) -> dict:
+        """确保数据可序列化"""
+        try:
+            serialized = {}
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    serialized[key] = self._serialize_data(value)
+                elif isinstance(value, (int, float, str, bool)):
+                    serialized[key] = value
+                elif isinstance(value, Decimal):
+                    serialized[key] = str(value)
+                elif isinstance(value, datetime):
+                    serialized[key] = value.isoformat()
+                elif value is None:
+                    serialized[key] = None
+                else:
+                    serialized[key] = str(value)
+            return serialized
+        except Exception as e:
+            self.logger.error(f"序列化数据失败: {str(e)}")
+            return {"error": str(e)}
 
 # 全局事件总线实例
 event_bus = EventBus()
@@ -221,6 +261,7 @@ class BaseStrategy(ABC):
         self._state = None
         self._is_running = False
         self._task = None
+        self._state_lock = asyncio.Lock()  # 添加状态锁
         self.logger = logger.bind(strategy=self.__class__.__name__)
         
         # 初始化状态
@@ -228,19 +269,65 @@ class BaseStrategy(ABC):
 
     def _initialize_state(self):
         """初始化策略状态"""
-        # 从数据库加载状态
-        self._load_state()
-        
-        # 如果没有状态记录，设置为停止状态
-        if not self._state:
-            self.set_state(StoppedState())
-            self._state._save_status(StrategyStatus.STOPPED)
-        
-        # 确保初始状态为停止
-        if self.current_state != StrategyStatus.STOPPED.value:
-            self.logger.warning(f"策略初始化时状态不是停止状态，强制设置为停止状态")
-            self.set_state(StoppedState())
-            self._state._save_status(StrategyStatus.STOPPED)
+        try:
+            self.logger.info("初始化策略状态")
+            
+            # 从数据库加载状态
+            state = self.db_session.query(StrategyState).filter_by(
+                strategy_name=self.__class__.__name__,
+                symbol=self.symbol
+            ).first()
+            
+            if not state:
+                self.logger.info("未找到策略状态记录，创建新记录")
+                state = StrategyState(
+                    strategy_name=self.__class__.__name__,
+                    symbol=self.symbol,
+                    status=StrategyStatus.STOPPED.value,
+                    position=Decimal('0'),
+                    avg_entry_price=Decimal('0'),
+                    unrealized_pnl=Decimal('0'),
+                    total_pnl=Decimal('0'),
+                    total_commission=Decimal('0')
+                )
+                self.db_session.add(state)
+                self.db_session.commit()
+            
+            # 根据数据库状态设置策略状态
+            status = StrategyStatus(state.status)
+            state_obj = None
+            if status == StrategyStatus.RUNNING:
+                state_obj = RunningState()
+            elif status == StrategyStatus.PAUSED:
+                state_obj = PausedState()
+            elif status == StrategyStatus.ERROR:
+                state_obj = ErrorState()
+            else:
+                state_obj = StoppedState()
+                
+            # 直接设置状态，不使用异步方法
+            state_obj.strategy = self
+            self._state = state_obj
+            
+            # 加载仓位信息
+            self.position.quantity = state.position
+            self.position.avg_price = state.avg_entry_price
+            self.total_pnl = state.total_pnl
+            self.total_commission = state.total_commission
+            
+            # 确保运行状态一致性
+            self._is_running = status == StrategyStatus.RUNNING
+            if self._is_running and not self._task:
+                self._task = asyncio.create_task(self.run())
+            
+            self.logger.info(f"策略状态初始化完成: {self.state_info}")
+            
+        except Exception as e:
+            self.logger.error(f"初始化策略状态失败: {str(e)}")
+            # 出错时设置为停止状态
+            state_obj = StoppedState()
+            state_obj.strategy = self
+            self._state = state_obj
             self._is_running = False
             if self._task:
                 self._task.cancel()
@@ -267,20 +354,43 @@ class BaseStrategy(ABC):
 
     @property
     def state_info(self) -> dict:
-        """策略状态信息"""
-        return {
-            "strategy_name": self.__class__.__name__,
-            "symbol": self.symbol,
-            "is_running": self.is_running,
-            "status": self.current_state,
-            "position": float(self.position.quantity),
-            "avg_entry_price": float(self.position.avg_price),
-            "total_pnl": float(self.total_pnl),
-            "total_commission": float(self.total_commission),
-            "unrealized_pnl": float(self.calculate_unrealized_pnl()),
-            "position_value": float(self.position.position_value),
-            "risk_info": self.risk_manager.get_risk_info()
-        }
+        """获取策略状态信息"""
+        try:
+            # 计算未实现盈亏
+            unrealized_pnl = self.calculate_unrealized_pnl()
+            
+            # 获取仓位信息
+            position_info = {
+                "symbol": self.symbol,
+                "quantity": str(self.position.quantity),
+                "avg_entry_price": str(self.position.avg_price),
+                "leverage": str(self.position.leverage),
+                "unrealized_pnl": str(unrealized_pnl),
+                "total_pnl": str(self.total_pnl),
+                "total_commission": str(self.total_commission)
+            }
+            
+            # 获取风险信息
+            risk_info = {
+                "max_position_value": str(self.risk_manager.risk_limit.max_position_value),
+                "current_position_value": str(self.get_current_cost()),
+                "remaining_position_value": str(self.get_remaining_cost())
+            }
+            
+            return {
+                "status": self.current_state,
+                "position_info": position_info,
+                "risk_info": risk_info,
+                "last_update": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            self.logger.error(f"获取策略状态信息失败: {str(e)}")
+            return {
+                "status": "error",
+                "position_info": {},
+                "risk_info": {},
+                "last_update": datetime.utcnow().isoformat()
+            }
 
     @property
     def capital_info(self) -> dict:
@@ -318,92 +428,64 @@ class BaseStrategy(ABC):
         current_value = self.get_current_cost()
         self.risk_manager.update_used_capital(current_value)
 
-    def set_state(self, state: StrategyStateBase):
-        """设置策略状态"""
-        self._state = state
-        self._state.strategy = self
-        self._state.logger = self.logger
+    async def set_state(self, state: StrategyStateBase):
+        """设置策略状态（线程安全）"""
+        async with self._state_lock:
+            try:
+                self.logger.info(f"切换策略状态: {state.__class__.__name__}")
+                state.strategy = self
+                self._state = state
+                await self._save_state()
+            except Exception as e:
+                self.logger.error(f"设置策略状态失败: {str(e)}")
+                raise
 
     async def start(self):
         """启动策略"""
-        try:
-            if self.is_running:
-                raise Exception("策略已经在运行中")
-            
-            # 清理之前的任务
-            if self._task:
-                self._task.cancel()
-                self._task = None
-            
-            # 调用策略特定的初始化
-            await self._on_start()
-            
-            # 创建运行任务
-            self._task = asyncio.create_task(self.run())
-            
-            # 更新状态
-            self._is_running = True
-            
-            # 更新状态并广播（只广播一次）
-            await self._state.start()
-            
-            self.logger.info(f"{self.__class__.__name__} 策略已启动")
-        except Exception as e:
-            self._is_running = False
-            if self._task:
-                self._task.cancel()
-                self._task = None
-            self.logger.error(f"启动策略失败: {str(e)}")
-            raise
+        async with self._state_lock:
+            try:
+                self.logger.info("尝试启动策略")
+                await self._state.start()
+                self._is_running = True
+                self._task = asyncio.create_task(self.run())
+                self.logger.info("策略启动成功")
+            except Exception as e:
+                self.logger.error(f"启动策略失败: {str(e)}")
+                self._is_running = False
+                if self._task:
+                    self._task.cancel()
+                    self._task = None
+                raise
 
     async def stop(self):
         """停止策略"""
-        try:
-            if not self.is_running:
-                raise Exception("策略未在运行")
-            
-            # 调用策略特定的清理
-            await self._on_stop()
-            
-            self._is_running = False
-            await self._state.stop()
-            
-            if self._task:
-                self._task.cancel()
-                self._task = None
-            
-            # 立即广播状态更新
-            asyncio.create_task(event_bus.publish(
-                'strategy_update',
-                {
-                    'symbol': self.symbol,
-                    'strategy_info': self.state_info,
-                    'market_data': self.client.get_market_price(self.symbol)
-                }
-            ))
-            
-            self.logger.info(f"{self.__class__.__name__} 策略已停止")
-        except Exception as e:
-            # 确保策略被完全停止
-            self._is_running = False
-            if self._task:
-                self._task.cancel()
-                self._task = None
-            self.set_state(StoppedState())
-            self._state._save_status(StrategyStatus.STOPPED)
-            self.logger.error(f"停止策略时发生错误: {str(e)}")
-            raise
+        async with self._state_lock:
+            try:
+                self.logger.info("尝试停止策略")
+                await self._state.stop()
+                self._is_running = False
+                if self._task:
+                    self._task.cancel()
+                    self._task = None
+                self.logger.info("策略停止成功")
+            except Exception as e:
+                self.logger.error(f"停止策略失败: {str(e)}")
+                raise
 
     async def pause(self):
         """暂停策略"""
-        try:
-            if not self.is_running:
-                raise Exception("无法暂停未运行的策略")
-            await self._state.pause()
-            self.logger.info(f"{self.__class__.__name__} 策略已暂停")
-        except Exception as e:
-            self.logger.error(f"暂停策略失败: {str(e)}")
-            raise
+        async with self._state_lock:
+            try:
+                self.logger.info("尝试暂停策略")
+                await self._state.pause()
+                self._is_running = False
+                if self._task:
+                    self._task.cancel()
+                    self._task = None
+                self.logger.info("策略暂停成功")
+            except Exception as e:
+                self.logger.error(f"暂停策略失败: {str(e)}")
+                raise
 
     async def resume(self):
         """恢复策略"""

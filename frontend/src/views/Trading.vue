@@ -4,12 +4,12 @@
     
     <el-row :gutter="20">
       <!-- 市场数据卡片 -->
-      <el-col :span="3">
+      <el-col :span="4">
         <MarketData />
       </el-col>
 
       <!-- 市场走势图卡片 -->
-      <el-col :span="21">
+      <el-col :span="20">
         <MarketChart />
       </el-col>
     </el-row>

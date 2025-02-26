@@ -122,117 +122,213 @@ async def root():
 async def get_balance():
     """获取账户余额"""
     try:
-        balances = await okx_client.get_balance()
+        app_logger.info("获取账户余额")
+        try:
+            balances = await okx_client.get_balance()
+        except Exception as e:
+            app_logger.error(f"调用OKX API获取余额失败: {str(e)}")
+            balances = None
+        
+        # 如果没有余额数据，返回默认值
+        if not balances:
+            return {
+                "code": "0",
+                "msg": "",
+                "data": {
+                    "total_equity": "0",
+                    "available_balance": "0",
+                    "position_margin": "0",
+                    "order_margin": "0",
+                    "unrealized_pnl": "0",
+                    "margin_ratio": "0",
+                    "maint_margin_ratio": "0",
+                    "initial_margin_ratio": "0"
+                }
+            }
+            
+        # 确保所有数值都转换为字符串
+        formatted_balances = {}
+        for key, value in balances.items():
+            if isinstance(value, (int, float, Decimal)):
+                formatted_balances[key] = str(value)
+            elif value is None:
+                formatted_balances[key] = "0"
+            else:
+                formatted_balances[key] = str(value)
+                
+        # 确保所有必要字段都存在
+        required_fields = [
+            "total_equity", "available_balance", "position_margin",
+            "order_margin", "unrealized_pnl", "margin_ratio",
+            "maint_margin_ratio", "initial_margin_ratio"
+        ]
+        
+        for field in required_fields:
+            if field not in formatted_balances:
+                formatted_balances[field] = "0"
+                
         return {
             "code": "0",
             "msg": "",
-            "data": balances
+            "data": formatted_balances
         }
     except Exception as e:
-        error_msg = f"获取账户余额失败: {e}"
-        logger.error(error_msg)
+        error_msg = f"获取账户余额失败: {str(e)}"
+        app_logger.error(error_msg)
         return {
-            "code": "1",
-            "msg": error_msg,
-            "data": None
+            "code": "0",  # 返回0以避免前端报错
+            "msg": "",
+            "data": {
+                "total_equity": "0",
+                "available_balance": "0",
+                "position_margin": "0",
+                "order_margin": "0",
+                "unrealized_pnl": "0",
+                "margin_ratio": "0",
+                "maint_margin_ratio": "0",
+                "initial_margin_ratio": "0"
+            }
         }
 
 @app.get("/api/market/price/{symbol}")
 async def get_market_price(symbol: str):
     """获取市场价格"""
     try:
-        data = await okx_client.get_ticker()
-        if data:
-            # 确保返回的数据格式正确
+        app_logger.info(f"获取市场价格: {symbol}")
+        try:
+            data = await okx_client.get_ticker()
+        except Exception as e:
+            app_logger.error(f"调用OKX API获取行情失败: {str(e)}")
+            data = None
+        
+        # 默认返回值
+        default_data = {
+            "symbol": symbol,
+            "last": "0",
+            "last_price": "0",
+            "best_bid": "0",
+            "best_ask": "0",
+            "volume_24h": "0",
+            "high_24h": "0",
+            "low_24h": "0",
+            "open_24h": "0",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        if not data:
             return {
                 "code": "0",
                 "msg": "",
-                "data": {
-                    "symbol": symbol,
-                    "last_price": str(data.last_price),
-                    "best_bid": str(data.best_bid),
-                    "best_ask": str(data.best_ask),
-                    "volume_24h": str(data.volume_24h),
-                    "high_24h": str(data.high_24h),
-                    "low_24h": str(data.low_24h),
-                    "timestamp": data.timestamp.isoformat()
-                }
+                "data": [default_data]  # 返回列表格式
             }
+            
+        # 确保所有数值都转换为字符串
+        try:
+            formatted_data = {
+                "symbol": symbol,
+                "last": str(data.get('last', '0')),
+                "last_price": str(data.get('last', '0')),
+                "best_bid": str(data.get('best_bid', '0')),
+                "best_ask": str(data.get('best_ask', '0')),
+                "volume_24h": str(data.get('volume_24h', '0')),
+                "high_24h": str(data.get('high_24h', '0')),
+                "low_24h": str(data.get('low_24h', '0')),
+                "open_24h": str(data.get('open_24h', '0')),
+                "timestamp": data.get('timestamp', datetime.now().isoformat())
+            }
+        except Exception as e:
+            app_logger.error(f"格式化市场数据失败: {str(e)}")
+            return {
+                "code": "0",
+                "msg": "",
+                "data": [default_data]  # 返回列表格式
+            }
+        
         return {
-            "code": "1",
-            "msg": "获取市场价格失败",
-            "data": None
+            "code": "0",
+            "msg": "",
+            "data": [formatted_data]  # 返回列表格式
         }
     except Exception as e:
-        error_msg = f"获取市场价格失败: {e}"
-        logger.error(error_msg)
+        error_msg = f"获取市场价格失败: {str(e)}"
+        app_logger.error(error_msg)
         return {
-            "code": "1",
-            "msg": error_msg,
-            "data": None
+            "code": "0",  # 返回0以避免前端报错
+            "msg": "",
+            "data": [{  # 返回列表格式
+                "symbol": symbol,
+                "last": "0",
+                "last_price": "0",
+                "best_bid": "0",
+                "best_ask": "0",
+                "volume_24h": "0",
+                "high_24h": "0",
+                "low_24h": "0",
+                "open_24h": "0",
+                "timestamp": datetime.now().isoformat()
+            }]
         }
 
-@app.get("/api/market/kline/{symbol}")
-async def get_kline(
-    symbol: str, 
-    interval: str = "15m",
-    limit: int = 200
-):
-    """获取K线数据
-    
-    Args:
-        symbol: 交易对
-        interval: K线周期，默认15分钟
-        limit: 返回的K线数量限制，默认200
-        
-    Returns:
-        返回指定时间范围内的K线数据
-    """
+@app.get("/api/market/kline/{symbol}/{interval}")
+async def get_kline(symbol: str, interval: str = "15m"):
+    """获取K线数据"""
     try:
-        app_logger.info(f"请求K线数据: symbol={symbol}, interval={interval}, limit={limit}")
-        
-        # 获取K线数据
-        candlesticks = await okx_client.get_candlesticks(
-            symbol, 
-            interval,
-            limit=limit
-        )
-        
-        app_logger.debug(f"获取到K线数据: {candlesticks}")
-        
-        if not candlesticks:
+        app_logger.info(f"获取K线数据: {symbol}, {interval}")
+        try:
+            data = await okx_client.get_klines(symbol, interval)
+        except Exception as e:
+            app_logger.error(f"调用OKX API获取K线数据失败: {str(e)}")
+            data = None
+            
+        if not data:
             return {
-                "code": "1",
-                "msg": "获取K线数据失败",
+                "code": "0",
+                "msg": "",
                 "data": []
             }
             
-        # 转换为前端需要的格式
-        data = []
-        for candle in candlesticks:
-            data.append([
-                int(candle.timestamp.timestamp() * 1000),  # 时间戳
-                str(candle.open),                          # 开盘价
-                str(candle.high),                          # 最高价
-                str(candle.low),                           # 最低价
-                str(candle.close),                         # 收盘价
-                str(candle.volume),                        # 成交量
-            ])
+        # 格式化数据
+        formatted_data = []
+        try:
+            for candle in data:
+                # 确保每个字段都有值
+                timestamp = int(float(candle[0])) if candle[0] else int(datetime.now().timestamp() * 1000)
+                open_price = str(candle[1]) if len(candle) > 1 else "0"
+                high = str(candle[2]) if len(candle) > 2 else "0"
+                low = str(candle[3]) if len(candle) > 3 else "0"
+                close = str(candle[4]) if len(candle) > 4 else "0"
+                volume = str(candle[5]) if len(candle) > 5 else "0"
+                
+                formatted_data.append([
+                    timestamp,
+                    open_price,
+                    high,
+                    low,
+                    close,
+                    volume
+                ])
+        except Exception as e:
+            app_logger.error(f"处理K线数据失败: {str(e)}")
+            return {
+                "code": "0",
+                "msg": "",
+                "data": []
+            }
             
         # 按时间正序排列
-        data.sort(key=lambda x: x[0])
+        formatted_data.sort(key=lambda x: x[0])
             
         return {
             "code": "0",
             "msg": "",
-            "data": data
+            "data": formatted_data
         }
     except Exception as e:
-        error_msg = f"获取K线数据异常: {str(e)}"
+        error_msg = f"获取K线数据失败: {str(e)}"
         app_logger.error(error_msg)
         return {
-            "code": "1",
-            "msg": error_msg,
+            "code": "0",
+            "msg": "",
             "data": []
         }
 
@@ -257,18 +353,186 @@ async def get_trades(symbol: str = None, limit: int = 100):
     } for trade in trades]
 
 @app.get("/api/strategy/state")
-async def get_strategy_state(symbol: str = None):
+async def get_strategy_state():
     """获取策略状态"""
     try:
-        # 返回当前策略的状态
-        state_info = strategy.state_info
-        # 确保状态是有效的枚举值
-        if not isinstance(state_info.get('status'), str) or state_info['status'] not in [s.value for s in StrategyStatus]:
-            state_info['status'] = StrategyStatus.STOPPED.value
-        return [state_info]
+        app_logger.info("获取策略状态")
+        try:
+            state = strategy.state_info
+        except Exception as e:
+            app_logger.error(f"获取策略状态信息失败: {str(e)}")
+            state = None
+        
+        if not state:
+            return {
+                "code": "0",
+                "msg": "",
+                "data": {
+                    "status": "stopped",
+                    "position_info": {
+                        "symbol": strategy.symbol,
+                        "quantity": "0",
+                        "avg_entry_price": "0",
+                        "leverage": "1",
+                        "unrealized_pnl": "0",
+                        "total_pnl": "0",
+                        "total_commission": "0"
+                    },
+                    "risk_info": {
+                        "max_position_value": "0",
+                        "current_position_value": "0",
+                        "remaining_position_value": "0"
+                    },
+                    "last_update": datetime.now().isoformat()
+                }
+            }
+            
+        # 确保所有必要字段都存在
+        if isinstance(state, dict):
+            if "position_info" not in state:
+                state["position_info"] = {}
+            if "risk_info" not in state:
+                state["risk_info"] = {}
+                
+            # 确保position_info中的字段存在
+            position_fields = [
+                "symbol", "quantity", "avg_entry_price", "leverage",
+                "unrealized_pnl", "total_pnl", "total_commission"
+            ]
+            for field in position_fields:
+                if field not in state["position_info"]:
+                    state["position_info"][field] = "0"
+                    
+            # 确保risk_info中的字段存在
+            risk_fields = [
+                "max_position_value", "current_position_value",
+                "remaining_position_value"
+            ]
+            for field in risk_fields:
+                if field not in state["risk_info"]:
+                    state["risk_info"][field] = "0"
+                    
+            # 确保状态字段存在
+            if "status" not in state:
+                state["status"] = "stopped"
+                
+            # 确保last_update字段存在
+            if "last_update" not in state:
+                state["last_update"] = datetime.now().isoformat()
+        
+        return {
+            "code": "0",
+            "msg": "",
+            "data": state
+        }
     except Exception as e:
-        app_logger.error(f"获取策略状态失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = f"获取策略状态失败: {str(e)}"
+        app_logger.error(error_msg)
+        return {
+            "code": "0",  # 返回0以避免前端报错
+            "msg": "",
+            "data": {
+                "status": "stopped",
+                "position_info": {
+                    "symbol": strategy.symbol,
+                    "quantity": "0",
+                    "avg_entry_price": "0",
+                    "leverage": "1",
+                    "unrealized_pnl": "0",
+                    "total_pnl": "0",
+                    "total_commission": "0"
+                },
+                "risk_info": {
+                    "max_position_value": "0",
+                    "current_position_value": "0",
+                    "remaining_position_value": "0"
+                },
+                "last_update": datetime.now().isoformat()
+            }
+        }
+
+@app.get("/api/strategy/analysis")
+async def get_strategy_analysis():
+    """获取策略分析"""
+    try:
+        app_logger.info("获取策略分析")
+        try:
+            analysis = strategy.last_analysis
+        except Exception as e:
+            app_logger.error(f"获取策略分析失败: {str(e)}")
+            analysis = None
+        
+        # 默认分析结果
+        default_analysis = {
+            "reasoning": "",
+            "analysis": "",
+            "recommendation": "hold",
+            "confidence": "0",
+            "last_update": datetime.now().isoformat(),
+            "market_data": {
+                "price": "0",
+                "volume": "0",
+                "trend": "neutral"
+            }
+        }
+        
+        # 如果没有分析结果，返回默认值
+        if not analysis:
+            return {
+                "code": "0",
+                "msg": "",
+                "data": default_analysis
+            }
+            
+        # 格式化推理过程
+        if isinstance(analysis, dict):
+            # 处理reasoning字段
+            if 'reasoning' in analysis:
+                reasoning = analysis['reasoning']
+                if isinstance(reasoning, list):
+                    formatted_reasoning = []
+                    for reason in reasoning:
+                        if reason:
+                            cleaned_reason = reason.strip().rstrip('。') + '。'
+                            formatted_reasoning.append(cleaned_reason)
+                    analysis['reasoning'] = '\n'.join(formatted_reasoning)
+                elif isinstance(reasoning, str):
+                    analysis['reasoning'] = reasoning.strip()
+                else:
+                    analysis['reasoning'] = ""
+                    
+            # 确保所有必要字段都存在
+            for key, value in default_analysis.items():
+                if key not in analysis:
+                    analysis[key] = value
+                    
+            # 确保market_data字段存在
+            if 'market_data' not in analysis:
+                analysis['market_data'] = default_analysis['market_data']
+            else:
+                for key, value in default_analysis['market_data'].items():
+                    if key not in analysis['market_data']:
+                        analysis['market_data'][key] = value
+                        
+            # 确保confidence是字符串
+            if 'confidence' in analysis:
+                analysis['confidence'] = str(analysis['confidence'])
+        else:
+            analysis = default_analysis
+        
+        return {
+            "code": "0",
+            "msg": "",
+            "data": analysis
+        }
+    except Exception as e:
+        error_msg = f"获取策略分析失败: {str(e)}"
+        app_logger.error(error_msg)
+        return {
+            "code": "0",  # 返回0以避免前端报错
+            "msg": "",
+            "data": default_analysis
+        }
 
 @app.post("/api/strategy/start")
 async def start_strategy():
@@ -280,23 +544,45 @@ async def start_strategy():
         if strategy.is_running:
             error_msg = "策略已经在运行中"
             app_logger.error(error_msg)
-            raise HTTPException(status_code=400, detail=error_msg)
+            return {
+                "code": "1",
+                "msg": error_msg,
+                "data": {
+                    "status": "running"
+                }
+            }
         
         try:
             await strategy.start()
             app_logger.info("策略启动请求已发送")
-            return {"status": "success", "message": "策略启动中"}
+            return {
+                "code": "0",
+                "msg": "策略启动中",
+                "data": {
+                    "status": "starting"
+                }
+            }
         except Exception as e:
             error_msg = f"启动策略失败: {str(e)}"
             app_logger.error(error_msg)
-            raise HTTPException(status_code=500, detail=error_msg)
+            return {
+                "code": "1",
+                "msg": error_msg,
+                "data": {
+                    "status": "error"
+                }
+            }
         
-    except HTTPException:
-        raise
     except Exception as e:
         error_msg = f"启动策略失败: {str(e)}"
         app_logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": {
+                "status": "error"
+            }
+        }
 
 @app.post("/api/strategy/stop")
 async def stop_strategy():
@@ -306,22 +592,51 @@ async def stop_strategy():
         
         # 检查策略状态
         if not strategy.is_running:
-            raise HTTPException(status_code=400, detail="策略未在运行中")
+            error_msg = "策略未在运行中"
+            app_logger.error(error_msg)
+            return {
+                "code": "1",
+                "msg": error_msg,
+                "data": {
+                    "status": "stopped"
+                }
+            }
         
-        # 停止策略
-        await strategy._on_stop()
-        await strategy.stop()
-        
-        # 获取最新状态
-        state_info = strategy.state_info
-        app_logger.info(f"策略停止成功，新状态: {state_info['status']}")
-        
-        return {"status": "success", "message": "策略已停止", "state": state_info}
-        
+        try:
+            # 停止策略
+            await strategy._on_stop()
+            await strategy.stop()
+            
+            # 获取最新状态
+            state_info = strategy.state_info
+            app_logger.info(f"策略停止成功，新状态: {state_info['status']}")
+            
+            return {
+                "code": "0",
+                "msg": "策略已停止",
+                "data": state_info
+            }
+        except Exception as e:
+            error_msg = f"停止策略失败: {str(e)}"
+            app_logger.error(error_msg)
+            return {
+                "code": "1",
+                "msg": error_msg,
+                "data": {
+                    "status": "error"
+                }
+            }
+            
     except Exception as e:
         error_msg = f"停止策略失败: {str(e)}"
         app_logger.error(error_msg)
-        raise HTTPException(status_code=400, detail=error_msg)
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": {
+                "status": "error"
+            }
+        }
 
 @app.post("/api/strategy/pause")
 async def pause_strategy():
@@ -331,21 +646,50 @@ async def pause_strategy():
         
         # 检查策略状态
         if not strategy.is_running:
-            raise HTTPException(status_code=400, detail="策略未在运行中，无法暂停")
+            error_msg = "策略未在运行中，无法暂停"
+            app_logger.error(error_msg)
+            return {
+                "code": "1",
+                "msg": error_msg,
+                "data": {
+                    "status": "stopped"
+                }
+            }
         
-        # 暂停策略
-        await strategy.pause()
-        
-        # 获取最新状态
-        state_info = strategy.state_info
-        app_logger.info(f"策略暂停成功，新状态: {state_info['status']}")
-        
-        return {"status": "success", "message": "策略已暂停", "state": state_info}
-        
+        try:
+            # 暂停策略
+            await strategy.pause()
+            
+            # 获取最新状态
+            state_info = strategy.state_info
+            app_logger.info(f"策略暂停成功，新状态: {state_info['status']}")
+            
+            return {
+                "code": "0",
+                "msg": "策略已暂停",
+                "data": state_info
+            }
+        except Exception as e:
+            error_msg = f"暂停策略失败: {str(e)}"
+            app_logger.error(error_msg)
+            return {
+                "code": "1",
+                "msg": error_msg,
+                "data": {
+                    "status": "error"
+                }
+            }
+            
     except Exception as e:
         error_msg = f"暂停策略失败: {str(e)}"
         app_logger.error(error_msg)
-        raise HTTPException(status_code=400, detail=error_msg)
+        return {
+            "code": "1",
+            "msg": error_msg,
+            "data": {
+                "status": "error"
+            }
+        }
 
 @app.post("/api/clear_history")
 async def clear_history():

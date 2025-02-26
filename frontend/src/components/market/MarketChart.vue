@@ -84,11 +84,32 @@ const initChart = () => {
 };
 
 const updateChart = (data: any[]) => {
-  if (!chart) return;
+  if (!chart || !Array.isArray(data)) return;
   
-  const times = data.map(item => new Date(item[0]).toLocaleTimeString());
-  const values = data.map(item => [item[1], item[4], item[3], item[2]]); // [open, close, low, high]
+  const times = data.map(item => {
+    if (Array.isArray(item) && item.length > 0) {
+      return new Date(Number(item[0])).toLocaleTimeString();
+    }
+    return '';
+  }).filter(time => time !== '');
   
+  const values = data.map(item => {
+    if (Array.isArray(item) && item.length >= 5) {
+      return [
+        Number(item[1] || 0), // open
+        Number(item[4] || 0), // close
+        Number(item[3] || 0), // low
+        Number(item[2] || 0)  // high
+      ];
+    }
+    return [0, 0, 0, 0];
+  }).filter(value => value.some(v => v !== 0));
+  
+  if (times.length === 0 || values.length === 0) {
+    console.warn('No valid K-line data available');
+    return;
+  }
+
   chart.setOption({
     xAxis: {
       data: times
@@ -102,8 +123,15 @@ const updateChart = (data: any[]) => {
 const fetchKlineData = async () => {
   try {
     const response = await fetch(`/api/market/kline/${symbol.value}/${selectedPeriod.value}`);
-    const data = await response.json();
-    updateChart(data);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const result = await response.json();
+    if (result.code === "0" && Array.isArray(result.data)) {
+      updateChart(result.data);
+    } else {
+      console.error('获取K线数据失败:', result.msg);
+    }
   } catch (error) {
     console.error('获取K线数据失败:', error);
   }

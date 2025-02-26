@@ -1,28 +1,79 @@
 // 全局暗色主题样式
+:root {
+  color-scheme: dark;
+}
+
+html.dark {
+  --el-bg-color: #141414;
+  --el-bg-color-overlay: #1d1e1f;
+  --el-text-color-primary: #E5EAF3;
+  --el-text-color-regular: #CFD3DC;
+  --el-text-color-secondary: #A3A6AD;
+  --el-border-color: #363637;
+  --el-border-color-light: #363637;
+  --el-border-color-lighter: #363637;
+  --el-fill-color: #262727;
+  --el-fill-color-light: #1d1d1d;
+  --el-fill-color-blank: #000000;
+  --el-mask-color: rgba(0, 0, 0, 0.8);
+  --el-mask-color-extra-light: rgba(0, 0, 0, 0.3);
+  
+  // Card
+  --el-card-bg-color: #1d1d1d;
+  
+  // Button
+  --el-button-bg-color: #2b2b2b;
+  --el-button-text-color: #E5EAF3;
+  --el-button-border-color: #363637;
+  --el-button-hover-bg-color: #363637;
+  --el-button-active-bg-color: #404040;
+  
+  // Input
+  --el-input-bg-color: #1d1d1d;
+  --el-input-border-color: #363637;
+  --el-input-hover-border-color: #404040;
+  --el-input-focus-border-color: var(--el-color-primary);
+  
+  // Select
+  --el-select-input-focus-border-color: var(--el-color-primary);
+  --el-select-option-hover-bg-color: #363637;
+  
+  // Table
+  --el-table-bg-color: #1d1d1d;
+  --el-table-tr-bg-color: #1d1d1d;
+  --el-table-header-bg-color: #262727;
+  --el-table-border-color: #363637;
+  --el-table-fixed-box-shadow: 0 0 10px rgba(0, 0, 0, 0.12);
+  
+  // Loading
+  --el-loading-spinner-color: var(--el-color-primary);
+  --el-loading-mask-bg-color: rgba(0, 0, 0, 0.8);
+}
+
 html, body {
-  background-color: #000000;
-  color: #ffffff;
+  background-color: var(--el-bg-color);
+  color: var(--el-text-color-primary);
   min-height: 100%;
 }
 
 #app {
-  background-color: #000000;
+  background-color: var(--el-bg-color);
   min-height: 100vh;
 }
 
 .trading-view {
-  background-color: #000000;
+  background-color: var(--el-bg-color);
   min-height: 100vh;
 }
 
 // 覆盖一些Element Plus的默认样式
 .el-drawer {
-  background-color: #141414;
-  border-right: 1px solid #262626;
+  background-color: var(--el-bg-color);
+  border-right: 1px solid var(--el-border-color);
   
   &__header {
-    color: #ffffff;
-    border-bottom: 1px solid #262626;
+    color: var(--el-text-color-primary);
+    border-bottom: 1px solid var(--el-border-color);
     margin-bottom: 0;
     padding: 16px 20px;
   }
@@ -30,22 +81,39 @@ html, body {
   &__body {
     padding: 20px;
   }
-  
-  .el-card {
-    background-color: #1a1a1a;
-    border-color: #262626;
-    margin-bottom: 0;
-  }
 }
 
 .el-card {
-  --el-card-bg-color: #141414;
-  border-color: #262626;
-  color: #ffffff;
+  background-color: var(--el-card-bg-color);
+  border-color: var(--el-border-color);
+  color: var(--el-text-color-primary);
 
   .el-card__header {
-    border-bottom-color: #262626;
+    border-bottom-color: var(--el-border-color);
   }
+}
+
+.el-select-dropdown {
+  background-color: var(--el-bg-color);
+  border-color: var(--el-border-color);
+  
+  .el-select-dropdown__item {
+    color: var(--el-text-color-regular);
+    
+    &.hover, &:hover {
+      background-color: var(--el-fill-color-light);
+    }
+    
+    &.selected {
+      color: var(--el-color-primary);
+      background-color: var(--el-fill-color);
+    }
+  }
+}
+
+// 图表暗色主题
+.echarts-container {
+  background-color: var(--el-bg-color);
 }
 
 .el-table {
@@ -98,9 +166,4 @@ html, body {
       }
     }
   }
-}
-
-// 图表暗色主题
-.echarts-container {
-  background-color: #000000;
 } 

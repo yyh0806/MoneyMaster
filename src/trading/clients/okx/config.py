@@ -1,19 +1,71 @@
-"""OKX交易所配置"""
+"""OKX配置"""
 
 class OKXConfig:
-    """OKX交易所配置类"""
+    """OKX配置类"""
     
-    # REST API endpoints
-    REST_MAINNET_URL = "https://www.okx.com"
-    REST_TESTNET_URL = "https://www.okx.com"  # 测试网使用相同的URL，通过header区分
+    # REST API
+    REST_MAINNET_URL = "https://www.okx.com"  # 主网
+    REST_TESTNET_URL = "https://www.okx.com"  # 测试网
     
-    # WebSocket endpoints
-    WS_PUBLIC_MAINNET = "wss://ws.okx.com:8443/ws/v5/public"
-    WS_PRIVATE_MAINNET = "wss://ws.okx.com:8443/ws/v5/private"
-    WS_BUSINESS_MAINNET = "wss://ws.okx.com:8443/ws/v5/business"
-    WS_PUBLIC_TESTNET = "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999"
-    WS_PRIVATE_TESTNET = "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999"
-    WS_BUSINESS_TESTNET = "wss://wspap.okx.com:8443/ws/v5/business?brokerId=9999"
+    # WebSocket
+    WS_PUBLIC_MAINNET_URL = "wss://ws.okx.com:8443/ws/v5/public"  # 主网公共频道
+    WS_PRIVATE_MAINNET_URL = "wss://ws.okx.com:8443/ws/v5/private"  # 主网私有频道
+    WS_PUBLIC_TESTNET_URL = "wss://ws.okx.com:8443/ws/v5/public"  # 测试网公共频道
+    WS_PRIVATE_TESTNET_URL = "wss://ws.okx.com:8443/ws/v5/private"  # 测试网私有频道
+    
+    # API版本
+    API_VERSION = "v5"
+    
+    # 请求限制
+    RATE_LIMITS = {
+        "PUBLIC": 20,  # 每秒请求数
+        "PRIVATE": 5   # 每秒请求数
+    }
+    
+    # WebSocket配置
+    WS_PING_INTERVAL = 20  # 心跳间隔（秒）
+    WS_PING_TIMEOUT = 10   # 心跳超时（秒）
+    WS_CLOSE_TIMEOUT = 10  # 关闭超时（秒）
+    
+    # 重试配置
+    MAX_RETRIES = 3        # 最大重试次数
+    RETRY_DELAY = 1        # 重试延迟（秒）
+    
+    # 订单类型
+    ORDER_TYPES = {
+        "MARKET": "market",  # 市价单
+        "LIMIT": "limit",    # 限价单
+        "POST_ONLY": "post_only",  # 只做maker单
+        "FOK": "fok",        # 全部成交或立即取消
+        "IOC": "ioc"         # 立即成交并取消剩余
+    }
+    
+    # 订单方向
+    ORDER_SIDES = {
+        "BUY": "buy",    # 买入
+        "SELL": "sell"   # 卖出
+    }
+    
+    # 持仓方向
+    POSITION_SIDES = {
+        "LONG": "long",   # 多头
+        "SHORT": "short"  # 空头
+    }
+    
+    # 保证金模式
+    MARGIN_MODES = {
+        "ISOLATED": "isolated",  # 逐仓
+        "CROSS": "cross"        # 全仓
+    }
+    
+    # 订单状态
+    ORDER_STATUS = {
+        "PENDING": "pending",          # 等待成交
+        "PARTIALLY_FILLED": "partial",  # 部分成交
+        "FILLED": "filled",            # 完全成交
+        "CANCELLED": "cancelled",      # 已取消
+        "FAILED": "failed"            # 失败
+    }
     
     # API路径
     API_PATHS = {
@@ -25,7 +77,6 @@ class OKXConfig:
     }
     
     # WebSocket配置
-    WS_PING_INTERVAL = 25  # 心跳间隔（秒），修改为25秒，确保不超过官方建议的30秒
     WS_RECONNECT_DELAY = 5  # 重连延迟（秒）
     WS_MAX_RETRIES = 5     # 最大重试次数，增加到5次
     
@@ -44,7 +95,6 @@ class OKXConfig:
     MAX_KLINE_CACHE = 1000    # 每个周期最大K线缓存数量
     
     # API限制
-    RATE_LIMIT_PER_SECOND = 20  # 每秒请求限制
     MAX_CONNECTIONS = 5        # 最大连接数
     
     # API请求超时设置
