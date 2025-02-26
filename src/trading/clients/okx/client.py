@@ -574,7 +574,7 @@ class OKXClient:
             logger.error(f"获取订单信息失败: {e}")
             return None
             
-    async def get_balance(self) -> Dict[str, OKXBalance]:
+    async def get_balance(self) -> Dict[str, Dict[str, str]]:
         """获取账户余额"""
         if not all([self.api_key, self.api_secret, self.passphrase]):
             raise OKXAuthenticationError("获取余额需要API密钥")
@@ -602,14 +602,9 @@ class OKXClient:
                 try:
                     currency = detail['ccy']
                     balances[currency] = {
-                        'total_equity': detail.get('eq', '0'),
-                        'available_balance': detail.get('availBal', '0'),
-                        'position_margin': detail.get('frozenBal', '0'),
-                        'order_margin': detail.get('ordFrozen', '0'),
-                        'unrealized_pnl': detail.get('upl', '0'),
-                        'margin_ratio': detail.get('mgnRatio', '0'),
-                        'maint_margin_ratio': detail.get('mmr', '0'),
-                        'initial_margin_ratio': detail.get('imr', '0')
+                        'total': detail.get('eq', '0'),  # 总权益
+                        'available': detail.get('availBal', '0'),  # 可用余额
+                        'frozen': detail.get('frozenBal', '0')  # 冻结金额
                     }
                 except Exception as e:
                     logger.error(f"处理币种{currency}余额数据失败: {str(e)}")

@@ -118,13 +118,14 @@ async def root():
     """健康检查"""
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
-@app.get("/api/account/balance")
+@app.get("/api/v5/account/balance")
 async def get_balance():
     """获取账户余额"""
     try:
         app_logger.info("获取账户余额")
         try:
             balances = await okx_client.get_balance()
+            app_logger.debug(f"获取到原始余额数据: {balances}")
         except Exception as e:
             app_logger.error(f"调用OKX API获取余额失败: {str(e)}")
             balances = None
@@ -135,58 +136,35 @@ async def get_balance():
                 "code": "0",
                 "msg": "",
                 "data": {
-                    "total_equity": "0",
-                    "available_balance": "0",
-                    "position_margin": "0",
-                    "order_margin": "0",
-                    "unrealized_pnl": "0",
-                    "margin_ratio": "0",
-                    "maint_margin_ratio": "0",
-                    "initial_margin_ratio": "0"
+                    "balances": {}
                 }
             }
             
-        # 确保所有数值都转换为字符串
+        # 格式化余额数据
         formatted_balances = {}
-        for key, value in balances.items():
-            if isinstance(value, (int, float, Decimal)):
-                formatted_balances[key] = str(value)
-            elif value is None:
-                formatted_balances[key] = "0"
-            else:
-                formatted_balances[key] = str(value)
-                
-        # 确保所有必要字段都存在
-        required_fields = [
-            "total_equity", "available_balance", "position_margin",
-            "order_margin", "unrealized_pnl", "margin_ratio",
-            "maint_margin_ratio", "initial_margin_ratio"
-        ]
-        
-        for field in required_fields:
-            if field not in formatted_balances:
-                formatted_balances[field] = "0"
+        for currency, balance in balances.items():
+            if isinstance(balance, dict):
+                formatted_balances[currency] = {
+                    "total": balance.get('total', '0'),
+                    "available": balance.get('available', '0'),
+                    "frozen": balance.get('frozen', '0')
+                }
                 
         return {
             "code": "0",
             "msg": "",
-            "data": formatted_balances
+            "data": {
+                "balances": formatted_balances
+            }
         }
     except Exception as e:
         error_msg = f"获取账户余额失败: {str(e)}"
         app_logger.error(error_msg)
         return {
-            "code": "0",  # 返回0以避免前端报错
-            "msg": "",
+            "code": "1",  # 修改为错误码
+            "msg": error_msg,
             "data": {
-                "total_equity": "0",
-                "available_balance": "0",
-                "position_margin": "0",
-                "order_margin": "0",
-                "unrealized_pnl": "0",
-                "margin_ratio": "0",
-                "maint_margin_ratio": "0",
-                "initial_margin_ratio": "0"
+                "balances": {}
             }
         }
 
