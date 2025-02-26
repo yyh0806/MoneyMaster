@@ -44,6 +44,7 @@ class OKXWebSocketClient:
         self.api_secret = api_secret
         self.passphrase = passphrase
         self.parser = OKXDataParser()
+        self.is_logged_in = False  # 添加登录状态跟踪
         
         # 创建WebSocket管理器
         self._ws_public = OKXWebSocketManager(
@@ -82,9 +83,11 @@ class OKXWebSocketClient:
             public_connected = await self._ws_public.connect()
             private_connected = await self._ws_private.connect()
             business_connected = await self._ws_business.connect()
-            return public_connected and private_connected and business_connected
+            self.is_logged_in = public_connected and private_connected and business_connected
+            return self.is_logged_in
         except Exception as e:
             logger.error(f"WebSocket连接失败: {e}")
+            self.is_logged_in = False
             return False
             
     async def disconnect(self):
@@ -92,6 +95,7 @@ class OKXWebSocketClient:
         await self._ws_public.disconnect()
         await self._ws_private.disconnect()
         await self._ws_business.disconnect()
+        self.is_logged_in = False
         
     async def _handle_public_message(self, message: Dict):
         """处理公共频道消息"""
@@ -232,19 +236,19 @@ class OKXWebSocketClient:
         """处理K线数据"""
         try:
             # 从channel中提取时间周期
-            interval = channel.replace(OKXConfig.TOPICS["CANDLE"], "")
+            interval = channel.replace(OKXConfig.TOPICS['CANDLE'], "")
             
             candlestick = OKXCandlestick(
                 symbol=self.symbol,
                 interval=interval,
                 timestamp=datetime.fromtimestamp(int(data[0]) / 1000),
-                open=Decimal(data[1]),
-                high=Decimal(data[2]),
-                low=Decimal(data[3]),
-                close=Decimal(data[4]),
-                volume=Decimal(data[5]),
-                volume_currency=Decimal(data[6]) if len(data) > 6 else None,
-                trades_count=int(data[7]) if len(data) > 7 else None
+                open=Decimal(str(data[1])),
+                high=Decimal(str(data[2])),
+                low=Decimal(str(data[3])),
+                close=Decimal(str(data[4])),
+                volume=Decimal(str(data[5])),
+                volume_currency=Decimal(str(data[6])) if len(data) > 6 else None,
+                trades_count=None  # 不再尝试将交易数转换为整数
             )
             
             # 初始化时间周期的缓存
@@ -260,7 +264,8 @@ class OKXWebSocketClient:
                 self._candlesticks[interval].popitem(last=False)
                 
         except Exception as e:
-            raise OKXParseError("Candlestick", str(data), str(e))
+            logger.error(f"处理K线数据失败: {e}, data={data}")
+            raise
             
     async def subscribe_basic_data(self):
         """订阅基础市场数据"""
@@ -518,8 +523,8 @@ class OKXWebSocketClient:
         if interval not in OKXConfig.INTERVAL_MAP:
             raise OKXValidationError(f"不支持的时间周期: {interval}")
             
-        channel = f"candle{interval}"
-        await self._ws_public.subscribe(channel, [{
+        channel = f"{OKXConfig.TOPICS['CANDLE']}{OKXConfig.INTERVAL_MAP[interval]}"
+        await self._ws_business.subscribe(channel, [{
             "channel": channel,
             "instId": symbol
         }])
