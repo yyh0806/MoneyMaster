@@ -62,25 +62,17 @@ async def startup_event():
         connected = await okx_client.connect()
         if connected:
             app_logger.info("WebSocket连接成功")
-            # 预先订阅所有需要的数据
-            symbol = okx_client.symbol
-            await okx_client.ws.subscribe_ticker(symbol)
-            await okx_client.ws.subscribe_orderbook(symbol)
-            await okx_client.ws.subscribe_trades(symbol)
             
             # 订阅K线周期
             intervals = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
             for interval in intervals:
                 try:
                     app_logger.info(f"订阅K线数据: {interval}")
-                    await okx_client.ws.subscribe_candlesticks(symbol, interval)
+                    await okx_client.ws.subscribe_candlesticks(okx_client.symbol, interval)
                     await asyncio.sleep(1)  # 添加延迟，避免请求过快
                 except Exception as e:
                     app_logger.error(f"订阅K线数据失败 {interval}: {e}")
             app_logger.info("市场数据订阅成功")
-            
-            # 启动消息处理
-            await okx_client.ws.start()
         else:
             app_logger.error("WebSocket连接失败")
     except Exception as e:
@@ -465,10 +457,6 @@ async def strategy_websocket_endpoint(websocket: WebSocket, symbol: str):
         await manager.connect(websocket, symbol)
         last_market_data = None
         last_analysis = None
-        
-        # 订阅市场数据
-        await okx_client.subscribe_ticker(symbol)
-        await okx_client.subscribe_orderbook(symbol)
         
         while True:
             try:
