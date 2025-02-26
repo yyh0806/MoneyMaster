@@ -55,28 +55,119 @@ const initChart = () => {
   
   chart = echarts.init(chartContainer.value);
   const option = {
-    grid: {
+    animation: false,
+    legend: {
+      bottom: 10,
+      left: 'center',
+      data: ['K线', '成交量']
+    },
+    axisPointer: {
+      link: {xAxisIndex: 'all'},
+      label: {
+        backgroundColor: '#777'
+      }
+    },
+    grid: [{
       left: '10%',
-      right: '10%',
-      bottom: '15%'
-    },
-    xAxis: {
+      right: '8%',
+      height: '60%',
+      top: '5%'
+    }, {
+      left: '10%',
+      right: '8%',
+      top: '70%',
+      height: '20%'
+    }],
+    xAxis: [{
       type: 'category',
-      data: []
-    },
-    yAxis: {
-      type: 'value',
-      scale: true
-    },
+      data: [],
+      scale: true,
+      boundaryGap: true,
+      axisLine: {onZero: false},
+      splitLine: {show: false},
+      min: 'dataMin',
+      max: 'dataMax',
+      axisLabel: {
+        show: false
+      }
+    }, {
+      type: 'category',
+      gridIndex: 1,
+      data: [],
+      scale: true,
+      boundaryGap: true,
+      axisLine: {onZero: false},
+      axisTick: {show: false},
+      splitLine: {show: false},
+      min: 'dataMin',
+      max: 'dataMax'
+    }],
+    yAxis: [{
+      scale: true,
+      splitArea: {
+        show: true
+      }
+    }, {
+      scale: true,
+      gridIndex: 1,
+      splitNumber: 2,
+      axisLabel: {
+        show: true,
+        formatter: function (value: number) {
+          return Math.round(value);
+        }
+      },
+      axisLine: {show: false},
+      axisTick: {show: false},
+      splitLine: {show: false}
+    }],
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: [0, 1],
+        start: 0,
+        end: 100
+      },
+      {
+        show: true,
+        xAxisIndex: [0, 1],
+        type: 'slider',
+        bottom: '0%',
+        start: 0,
+        end: 100
+      }
+    ],
     tooltip: {
       trigger: 'axis',
       axisPointer: {
         type: 'cross'
+      },
+      backgroundColor: 'rgba(255, 255, 255, 0.8)',
+      position: function (pos: number[], params: any, el: any, elRect: any, size: any) {
+        const obj = {top: 10};
+        obj[['left', 'right'][+(pos[0] < size.viewSize[0] / 2)]] = 30;
+        return obj;
       }
     },
     series: [{
+      name: 'K线',
       type: 'candlestick',
-      data: []
+      data: [],
+      itemStyle: {
+        color: '#cc0000',
+        color0: '#00b33c',
+        borderColor: '#cc0000',
+        borderColor0: '#00b33c'
+      }
+    }, {
+      name: '成交量',
+      type: 'bar',
+      xAxisIndex: 1,
+      yAxisIndex: 1,
+      data: [],
+      itemStyle: {
+        color: '#7fbe9e'
+      }
     }]
   };
   
@@ -104,6 +195,21 @@ const updateChart = (data: any[]) => {
     }
     return [0, 0, 0, 0];
   }).filter(value => value.some(v => v !== 0));
+
+  const volumes = data.map(item => {
+    if (Array.isArray(item) && item.length >= 6) {
+      const volume = Number(item[5] || 0);
+      const open = Number(item[1] || 0);
+      const close = Number(item[4] || 0);
+      return {
+        value: volume,
+        itemStyle: {
+          color: close >= open ? '#00b33c' : '#cc0000'
+        }
+      };
+    }
+    return { value: 0, itemStyle: { color: '#00b33c' } };
+  }).filter(item => item.value !== 0);
   
   if (times.length === 0 || values.length === 0) {
     console.warn('No valid K-line data available');
@@ -111,11 +217,15 @@ const updateChart = (data: any[]) => {
   }
 
   chart.setOption({
-    xAxis: {
+    xAxis: [{
       data: times
-    },
+    }, {
+      data: times
+    }],
     series: [{
       data: values
+    }, {
+      data: volumes
     }]
   });
 };
