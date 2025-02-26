@@ -28,7 +28,7 @@ class OKXClient:
     """OKX交易所客户端"""
     
     def __init__(self, 
-                 symbol: str,
+                 symbol: str = None,
                  api_key: Optional[str] = None,
                  api_secret: Optional[str] = None,
                  passphrase: Optional[str] = None,
@@ -36,7 +36,7 @@ class OKXClient:
         """初始化OKX客户端
         
         Args:
-            symbol: 交易对
+            symbol: 默认交易对（可选）
             api_key: API密钥
             api_secret: API密钥对应的密文
             passphrase: API密码
@@ -376,23 +376,57 @@ class OKXClient:
             
     async def get_candlesticks(
         self,
-        interval: str,
+        symbol: str,
+        interval: str = "15m",
         limit: int = 100
     ) -> List[OKXCandlestick]:
         """获取K线数据
         
         Args:
-            interval: K线周期，如 "1m", "5m", "15m", "1h", "4h", "1d"
+            symbol: 交易对
+            interval: K线周期
             limit: 获取数量
+            
+        Returns:
+            List[OKXCandlestick]: K线数据列表
         """
         try:
-            return await self.ws.get_candlesticks(
-                self.symbol,
-                interval,
-                limit
-            )
+            if interval not in OKXConfig.INTERVAL_MAP:
+                raise OKXValidationError(f"不支持的时间周期: {interval}")
+                
+            params = {
+                "instId": symbol,
+                "bar": OKXConfig.INTERVAL_MAP[interval],
+                "limit": str(limit)
+            }
+            
+            response = await self._request('GET', '/api/v5/market/candles', params=params)
+            if not response or 'data' not in response:
+                logger.error(f"获取K线数据失败: {symbol} {interval}")
+                return []
+                
+            candlesticks = []
+            for item in response['data']:
+                try:
+                    # OKX返回的数据格式：[timestamp, open, high, low, close, vol, volCcy]
+                    candlesticks.append(OKXCandlestick(
+                        symbol=symbol,
+                        interval=interval,
+                        timestamp=datetime.fromtimestamp(int(item[0]) / 1000),
+                        open=Decimal(item[1]),
+                        high=Decimal(item[2]),
+                        low=Decimal(item[3]),
+                        close=Decimal(item[4]),
+                        volume=Decimal(item[5]),
+                        quote_volume=Decimal(item[6]) if len(item) > 6 else None
+                    ))
+                except Exception as e:
+                    logger.error(f"解析K线数据失败: {symbol} {interval} - {str(e)}")
+                    continue
+                
+            return candlesticks
         except Exception as e:
-            logger.error(f"获取K线数据失败: {e}")
+            logger.error(f"获取K线数据失败: {symbol} {interval} - {str(e)}")
             return []
             
     async def get_full_history_kline(self, symbol: str, interval: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None) -> List[OKXCandlestick]:
@@ -428,18 +462,18 @@ class OKXClient:
             
             # 解析响应数据
             candlesticks = []
-            for item in result:
+            for item in result.get('data', []):
                 # OKX返回的数据格式：[timestamp, open, high, low, close, vol, volCcy]
                 candlesticks.append(OKXCandlestick(
                     symbol=symbol,
                     interval=interval,
                     timestamp=datetime.fromtimestamp(int(item[0]) / 1000),
-                    open_price=Decimal(item[1]),
-                    high_price=Decimal(item[2]),
-                    low_price=Decimal(item[3]),
-                    close_price=Decimal(item[4]),
+                    open=Decimal(item[1]),
+                    high=Decimal(item[2]),
+                    low=Decimal(item[3]),
+                    close=Decimal(item[4]),
                     volume=Decimal(item[5]),
-                    quote_volume=Decimal(item[6])
+                    quote_volume=Decimal(item[6]) if len(item) > 6 else None
                 ))
                 
             return candlesticks

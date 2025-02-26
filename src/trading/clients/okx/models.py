@@ -93,7 +93,7 @@ class OKXTrade:
 
 @dataclass
 class OKXCandlestick:
-    """K线数据"""
+    """K线数据模型"""
     symbol: str
     interval: str
     timestamp: datetime
@@ -102,8 +102,7 @@ class OKXCandlestick:
     low: Decimal
     close: Decimal
     volume: Decimal
-    volume_currency: Optional[Decimal] = None
-    trades_count: Optional[int] = None
+    quote_volume: Optional[Decimal] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -115,8 +114,7 @@ class OKXCandlestick:
             "low": str(self.low),
             "close": str(self.close),
             "volume": str(self.volume),
-            "volume_currency": str(self.volume_currency) if self.volume_currency else None,
-            "trades_count": self.trades_count
+            "quote_volume": str(self.quote_volume) if self.quote_volume else None
         }
 
 @dataclass

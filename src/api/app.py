@@ -7,6 +7,7 @@ import asyncio
 from decimal import Decimal
 from loguru import logger
 import sys
+import atexit
 
 from src.trading.clients.okx.client import OKXClient
 from src.trading.strategies.deepseek import DeepseekStrategy
@@ -15,6 +16,7 @@ from src.trading.core.strategy import StoppedState
 from src.trading.core.risk import RiskLimit
 from src.config import settings
 from .websocket import manager, setup_event_handlers
+from .market_data import kline_manager, Candlestick
 
 # 配置日志
 logger.remove()  # 移除默认的日志处理器
@@ -56,37 +58,114 @@ setup_event_handlers()
 # 初始化WebSocket连接
 @app.on_event("startup")
 async def startup_event():
-    """服务启动时初始化WebSocket连接"""
-    app_logger.info("正在初始化WebSocket连接...")
+    """服务启动时初始化WebSocket连接和数据缓存"""
+    app_logger.info("正在初始化WebSocket连接和数据缓存...")
     try:
+        # 连接WebSocket
         connected = await okx_client.connect()
         if connected:
             app_logger.info("WebSocket连接成功")
             
-            # 订阅K线周期
+            # 初始化缓存数据
+            symbols = ["BTC-USDT", "ETH-USDT", "BNB-USDT", "XRP-USDT", "ADA-USDT"]
             intervals = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
-            for interval in intervals:
-                try:
-                    app_logger.info(f"订阅K线数据: {interval}")
-                    await okx_client.ws.subscribe_candlesticks(okx_client.symbol, interval)
-                    await asyncio.sleep(1)  # 添加延迟，避免请求过快
-                except Exception as e:
-                    app_logger.error(f"订阅K线数据失败 {interval}: {e}")
-            app_logger.info("市场数据订阅成功")
+            
+            for symbol in symbols:
+                for interval in intervals:
+                    try:
+                        app_logger.info(f"正在获取 {symbol} {interval} 的历史数据...")
+                        # 获取历史数据
+                        history_data = await okx_client.get_candlesticks(
+                            symbol=symbol,
+                            interval=interval,
+                            limit=1000  # 初始加载1000条数据
+                        )
+                        
+                        if history_data:
+                            app_logger.info(f"成功获取 {symbol} {interval} 的历史数据，共 {len(history_data)} 条")
+                            try:
+                                # 转换为缓存数据格式
+                                cache_data = []
+                                for candle in history_data:
+                                    try:
+                                        converted = Candlestick.from_okx_candlestick(candle)
+                                        cache_data.append(converted)
+                                    except Exception as e:
+                                        app_logger.error(f"转换K线数据失败: {symbol} {interval} - {str(e)}")
+                                        continue
+                                
+                                # 初始化缓存
+                                if cache_data:
+                                    await kline_manager.init_klines(symbol, interval, cache_data)
+                                    app_logger.info(f"已缓存 {symbol} {interval} 的历史数据，共 {len(cache_data)} 条")
+                                else:
+                                    app_logger.warning(f"转换后的缓存数据为空: {symbol} {interval}")
+                            except Exception as e:
+                                app_logger.error(f"处理历史数据失败: {symbol} {interval} - {str(e)}")
+                        else:
+                            app_logger.warning(f"未获取到 {symbol} {interval} 的历史数据")
+                            
+                        await asyncio.sleep(1)  # 添加延迟，避免请求过快
+                    except Exception as e:
+                        app_logger.error(f"缓存 {symbol} {interval} 历史数据失败: {str(e)}")
+                        # 继续处理下一个时间周期，不中断整个过程
+                        continue
+                        
+            app_logger.info("数据缓存初始化完成")
         else:
             app_logger.error("WebSocket连接失败")
     except Exception as e:
-        app_logger.error(f"初始化WebSocket连接失败: {e}")
+        app_logger.error(f"初始化失败: {str(e)}")
+        # 在这里可以选择是否要重试或者采取其他措施
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """服务关闭时断开WebSocket连接"""
-    app_logger.info("正在关闭WebSocket连接...")
+    """服务关闭时清理资源"""
+    app_logger.info("正在关闭服务...")
     try:
+        # 关闭WebSocket连接
+        app_logger.info("正在关闭WebSocket连接...")
         await okx_client.disconnect()
         app_logger.info("WebSocket连接已关闭")
+        
+        # 关闭数据库会话
+        app_logger.info("正在关闭数据库连接...")
+        db_session.close()
+        app_logger.info("数据库连接已关闭")
+        
+        # 关闭所有活跃的WebSocket连接
+        app_logger.info("正在关闭所有WebSocket连接...")
+        for symbol in list(manager.active_connections.keys()):
+            for ws in list(manager.active_connections[symbol]):
+                try:
+                    await ws.close()
+                except Exception as e:
+                    app_logger.error(f"关闭WebSocket连接失败: {e}")
+        app_logger.info("所有WebSocket连接已关闭")
+        
     except Exception as e:
-        app_logger.error(f"关闭WebSocket连接失败: {e}")
+        app_logger.error(f"关闭服务时发生错误: {e}")
+    finally:
+        # 确保连接器被关闭
+        if hasattr(okx_client, 'connector') and okx_client.connector:
+            await okx_client.connector.close()
+            app_logger.info("HTTP连接器已关闭")
+
+# 添加同步清理函数
+def cleanup():
+    """同步清理函数"""
+    try:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(shutdown_event())
+        else:
+            loop.run_until_complete(shutdown_event())
+    except Exception as e:
+        app_logger.error(f"清理资源失败: {e}")
+
+# 注册清理函数
+atexit.register(cleanup)
 
 # 创建策略实例
 strategy = DeepseekStrategy(
@@ -252,50 +331,23 @@ async def get_kline(symbol: str, interval: str = "15m"):
     """获取K线数据"""
     try:
         app_logger.info(f"获取K线数据: {symbol}, {interval}")
-        try:
-            data = await okx_client.get_klines(symbol, interval)
-        except Exception as e:
-            app_logger.error(f"调用OKX API获取K线数据失败: {str(e)}")
-            data = None
-            
-        if not data:
-            return {
-                "code": "0",
-                "msg": "",
-                "data": []
-            }
-            
-        # 格式化数据
-        formatted_data = []
-        try:
-            for candle in data:
-                # 确保每个字段都有值
-                timestamp = int(float(candle[0])) if candle[0] else int(datetime.now().timestamp() * 1000)
-                open_price = str(candle[1]) if len(candle) > 1 else "0"
-                high = str(candle[2]) if len(candle) > 2 else "0"
-                low = str(candle[3]) if len(candle) > 3 else "0"
-                close = str(candle[4]) if len(candle) > 4 else "0"
-                volume = str(candle[5]) if len(candle) > 5 else "0"
-                
-                formatted_data.append([
-                    timestamp,
-                    open_price,
-                    high,
-                    low,
-                    close,
-                    volume
-                ])
-        except Exception as e:
-            app_logger.error(f"处理K线数据失败: {str(e)}")
-            return {
-                "code": "0",
-                "msg": "",
-                "data": []
-            }
-            
-        # 按时间正序排列
-        formatted_data.sort(key=lambda x: x[0])
-            
+        
+        # 从管理器获取数据
+        klines = await kline_manager.get_klines(symbol, interval)
+        
+        if not klines:
+            # 如果没有缓存数据，从交易所获取
+            data = await okx_client.get_candlesticks(symbol, interval)
+            if data:
+                # 转换数据格式
+                klines = [Candlestick.from_okx_candlestick(candle) for candle in data]
+                # 初始化缓存
+                await kline_manager.init_klines(symbol, interval, klines)
+                app_logger.info(f"已缓存 {symbol} {interval} 的新数据")
+        
+        # 格式化返回数据
+        formatted_data = [k.to_list() for k in klines]
+        
         return {
             "code": "0",
             "msg": "",
@@ -706,61 +758,42 @@ async def clear_history():
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
     try:
         await manager.connect(websocket, symbol)
-        last_market_data = None
+        interval = "15m"  # 默认使用15分钟K线
         
+        # 1. 首次连接发送历史数据
+        klines = await kline_manager.get_klines(symbol, interval)
+        if klines:
+            await manager.send_personal_message(
+                json.dumps({
+                    "code": "0",
+                    "msg": "",
+                    "data": [k.to_list() for k in klines],
+                    "type": "kline_history"
+                }),
+                websocket
+            )
+            app_logger.info(f"已发送 {symbol} 的历史K线数据")
+        
+        # 2. 持续监听更新
         while True:
             try:
-                # 检查连接是否还在活跃状态
-                if symbol not in manager.active_connections or websocket not in manager.active_connections[symbol]:
-                    app_logger.warning(f"连接已不在活跃列表中: {symbol}")
-                    break
+                # 获取最新K线
+                latest_data = await okx_client.get_candlesticks(symbol, interval, limit=1)
+                if latest_data and latest_data[0]:
+                    current_kline = Candlestick.from_okx_candlestick(latest_data[0])
                     
-                # 获取完整的市场数据
-                market_data = {
-                    "ticker": await okx_client.get_ticker(symbol),
-                    "orderbook": await okx_client.get_orderbook(symbol),
-                    "trades": await okx_client.get_trades(symbol, limit=10)  # 最近10条成交
-                }
-                
-                if market_data != last_market_data:
-                    try:
-                        # 检查连接状态
-                        if websocket.client_state.DISCONNECTED:
-                            app_logger.warning("连接已断开")
-                            break
-                            
+                    # 尝试更新，如果有变化才发送
+                    if await kline_manager.update_kline(symbol, interval, current_kline):
                         await manager.send_personal_message(
                             json.dumps({
                                 "code": "0",
                                 "msg": "",
-                                "data": market_data
+                                "data": [current_kline.to_list()],
+                                "type": "kline_update"
                             }),
                             websocket
                         )
-                        last_market_data = market_data
-                    except Exception as e:
-                        app_logger.error(f"发送市场数据失败: {e}")
-                        break
-                
-                # 获取K线数据
-                try:
-                    kline_data = await okx_client.get_candlesticks(
-                        symbol,
-                        interval="15m",  # 默认使用15分钟K线
-                        limit=1  # 只获取最新的一根K线
-                    )
-                    
-                    if kline_data:
-                        await manager.send_personal_message(
-                            json.dumps({
-                                "code": "0",
-                                "msg": "",
-                                "data": kline_data
-                            }),
-                            websocket
-                        )
-                except Exception as e:
-                    app_logger.error(f"发送K线数据失败: {e}")
+                        app_logger.debug(f"已发送 {symbol} 的K线更新数据")
                 
                 await asyncio.sleep(1)
             except Exception as e:
