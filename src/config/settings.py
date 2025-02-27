@@ -27,4 +27,8 @@ DEFAULT_LEVERAGE = int(os.getenv('DEFAULT_LEVERAGE', '1'))
 
 # 日志配置
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs') 
+LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
+
+# 数据库配置
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///moneymaster.db')  # 默认使用SQLite
+DATABASE_ECHO = os.getenv('DATABASE_ECHO', 'false').lower() == 'true'  # 是否打印SQL语句 

@@ -11,6 +11,7 @@ import aiohttp
 from datetime import datetime
 import os
 import ssl
+import certifi
 from aiohttp import ClientTimeout
 
 from .config import OKXConfig
@@ -54,13 +55,17 @@ class OKXClient:
         self.rest_url = OKXConfig.REST_TESTNET_URL if testnet else OKXConfig.REST_MAINNET_URL
         
         # 设置代理
-        self.use_proxy = os.getenv('USE_PROXY', 'false').lower() == 'true'
+        self.use_proxy = os.getenv('USE_PROXY', 'true').lower() == 'true'  # 默认启用代理
+        self.proxies = {
+            'http': 'http://127.0.0.1:7890',  # 使用HTTP代理
+            'https': 'http://127.0.0.1:7890'  # 使用HTTP代理处理HTTPS请求
+        }
+        
+        # 代理设置日志
         if self.use_proxy:
-            self.proxies = {
-                'http': os.getenv('HTTP_PROXY'),
-                'https': os.getenv('HTTPS_PROXY')
-            }
+            logger.info(f"启用HTTP代理服务器: {self.proxies['http']}")
         else:
+            logger.info("未使用代理服务器")
             self.proxies = None
             
         # 创建WebSocket客户端
@@ -72,13 +77,19 @@ class OKXClient:
             testnet=testnet
         )
         
-        # 配置SSL上下文
-        self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
+        # 创建SSL上下文
+        self.ssl_context = ssl.create_default_context(cafile=certifi.where())
+        self.ssl_context.verify_mode = ssl.CERT_REQUIRED
+        self.ssl_context.check_hostname = True
         
         # 创建连接器和session
-        self.connector = aiohttp.TCPConnector(ssl=self.ssl_context)
+        self.connector = aiohttp.TCPConnector(
+            ssl=self.ssl_context,
+            verify_ssl=True,
+            enable_cleanup_closed=True,
+            force_close=True,
+            ttl_dns_cache=300
+        )
         self.timeout = ClientTimeout(total=30)
         self.session = None
         
@@ -177,28 +188,16 @@ class OKXClient:
         return True
     
     async def _request(self, method: str, path: str, **kwargs) -> Dict:
-        """发送HTTP请求
-        
-        在请求前确保已登录状态
-        
-        Args:
-            method: 请求方法
-            path: 请求路径
-            **kwargs: 其他参数
+        """发送HTTP请求到OKX API"""
+        # 确保path不以/开头
+        if path.startswith('/'):
+            path = path[1:]
             
-        Returns:
-            Dict: 响应数据
-        """
-        # 如果需要API密钥，确保已登录
-        if all([self.api_key, self.api_secret, self.passphrase]):
-            # 确保已登录（WebSocket登录状态会影响一些API的连接状态）
-            await self.ensure_login()
+        # 构造完整的URL，确保包含API版本
+        if not path.startswith('api/v5/'):
+            path = f"api/v5/{path}"
             
-        if not path.startswith('/'):
-            path = '/' + path
-            
-        # 构建完整URL
-        url = self.rest_url + path
+        url = f"{self.rest_url}/{path}"
         logger.debug(f"请求URL: {url}")
         
         # 准备请求数据
@@ -211,7 +210,7 @@ class OKXClient:
         
         # 生成签名
         data_str = json.dumps(data) if data else ''
-        sign = self._sign(timestamp, method, path, data_str)
+        sign = self._sign(timestamp, method, f"/{path}", data_str)  # 确保签名路径正确
         
         # 设置请求头
         headers = {
@@ -240,7 +239,9 @@ class OKXClient:
                     params=params,
                     headers=headers,
                     proxy=proxy,
-                    verify_ssl=False
+                    ssl=self.ssl_context,
+                    verify_ssl=True,
+                    timeout=self.timeout
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
@@ -248,20 +249,28 @@ class OKXClient:
                         raise OKXRequestError(f"HTTP {response.status}: {error_text}")
                         
                     result = await response.json()
-                    if result.get('code') != '0':
-                        error_msg = result.get('msg', 'Unknown error')
-                        logger.error(f"API返回错误: code={result.get('code')}, msg={error_msg}")
-                        raise OKXError(f"API Error: {error_msg}")
-                        
-                    return result
+                    logger.debug(f"API响应: {result}")
                     
-            elif method.upper() == 'POST':
-                async with session.post(
+                    if not isinstance(result, dict):
+                        raise OKXRequestError("API响应格式错误")
+                        
+                    if result.get('code') != '0':
+                        error_msg = result.get('msg', '未知错误')
+                        logger.error(f"API错误: {error_msg}")
+                        raise OKXRequestError(f"API错误: {error_msg}")
+                        
+                    return result.get('data', {})
+            else:
+                async with session.request(
+                    method,
                     url,
                     json=data,
+                    params=params,
                     headers=headers,
                     proxy=proxy,
-                    verify_ssl=False
+                    ssl=self.ssl_context,
+                    verify_ssl=True,
+                    timeout=self.timeout
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
@@ -269,22 +278,21 @@ class OKXClient:
                         raise OKXRequestError(f"HTTP {response.status}: {error_text}")
                         
                     result = await response.json()
-                    if result.get('code') != '0':
-                        error_msg = result.get('msg', 'Unknown error')
-                        logger.error(f"API返回错误: code={result.get('code')}, msg={error_msg}")
-                        raise OKXError(f"API Error: {error_msg}")
-                        
-                    return result
+                    logger.debug(f"API响应: {result}")
                     
-            else:
-                raise ValueError(f"不支持的HTTP方法: {method}")
-                
+                    if not isinstance(result, dict):
+                        raise OKXRequestError("API响应格式错误")
+                        
+                    if result.get('code') != '0':
+                        error_msg = result.get('msg', '未知错误')
+                        logger.error(f"API错误: {error_msg}")
+                        raise OKXRequestError(f"API错误: {error_msg}")
+                        
+                    return result.get('data', {})
+                    
         except aiohttp.ClientError as e:
             logger.error(f"HTTP请求错误: {str(e)}")
             raise OKXRequestError(f"HTTP请求错误: {str(e)}")
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON解析错误: {str(e)}")
-            raise OKXRequestError(f"JSON解析错误: {str(e)}")
         except Exception as e:
             logger.error(f"请求异常: {str(e)}")
             raise OKXRequestError(f"请求异常: {str(e)}")
@@ -328,18 +336,17 @@ class OKXClient:
     async def get_ticker(self) -> Dict:
         """获取市场行情数据"""
         try:
-            response = await self._request('GET', '/api/v5/market/ticker', params={'instId': self.symbol})
-            if not response or 'data' not in response:
-                logger.error("获取市场行情响应格式错误")
+            response = await self._request('GET', '/market/ticker', params={'instId': self.symbol})
+            if not response:
+                logger.error("获取市场行情响应为空")
                 return {}
                 
-            data = response['data']
-            if not data or not isinstance(data, list) or len(data) == 0:
+            if not isinstance(response, list) or len(response) == 0:
                 logger.warning("市场行情数据为空")
                 return {}
                 
             # OKX返回的是一个列表，我们取第一个数据
-            ticker_data = data[0]
+            ticker_data = response[0]
             
             # 格式化数据
             return {
@@ -614,24 +621,23 @@ class OKXClient:
             raise OKXAuthenticationError("获取余额需要API密钥")
             
         try:
-            response = await self._request('GET', '/api/v5/account/balance')
-            if not response or 'data' not in response:
-                logger.error("获取账户余额响应格式错误")
+            response = await self._request('GET', '/account/balance')
+            if not response:
+                logger.error("获取账户余额响应为空")
                 return {}
                 
-            balances = {}
-            data = response['data']
-            if not data or not isinstance(data, list) or len(data) == 0:
+            if not isinstance(response, list) or len(response) == 0:
                 logger.warning("账户余额数据为空")
                 return {}
                 
             # OKX返回的是一个列表，我们取第一个账户的数据
-            account_data = data[0]
+            account_data = response[0]
             if 'details' not in account_data:
                 logger.error("账户数据格式错误")
                 return {}
                 
             # 处理每个币种的余额
+            balances = {}
             for detail in account_data['details']:
                 try:
                     currency = detail['ccy']
@@ -641,10 +647,38 @@ class OKXClient:
                         'frozen': detail.get('frozenBal', '0')  # 冻结金额
                     }
                 except Exception as e:
-                    logger.error(f"处理币种{currency}余额数据失败: {str(e)}")
+                    logger.error(f"处理币种余额数据失败: {str(e)}")
                     continue
                     
             return balances
         except Exception as e:
             logger.error(f"获取账户余额失败: {str(e)}")
-            return {} 
+            return {}
+
+    async def get_klines(self, symbol: str, interval: str, limit: int = 300) -> List[dict]:
+        """获取K线数据"""
+        try:
+            # 转换时间间隔格式
+            interval_map = {
+                "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+                "1H": "1H", "4H": "4H", "1D": "1D"
+            }
+            bar = interval_map.get(interval)
+            if not bar:
+                raise ValueError(f"不支持的时间间隔: {interval}")
+                
+            path = f"/api/v5/market/candles"
+            params = {
+                "instId": symbol,
+                "bar": bar,
+                "limit": str(limit)
+            }
+            
+            response = await self._request("GET", path, params=params)
+            if response and "data" in response:
+                return response["data"]
+            return []
+            
+        except Exception as e:
+            logger.error(f"获取K线数据失败: {symbol} {interval} - {str(e)}")
+            raise 

@@ -4,8 +4,30 @@ from sqlalchemy import Column, Integer, String, DateTime, create_engine, DECIMAL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from enum import Enum
+from src.config import settings
 
 Base = declarative_base()
+
+# 数据库引擎和会话工厂
+engine = None
+Session = None
+
+def get_engine():
+    """获取数据库引擎，如果不存在则创建"""
+    global engine
+    if engine is None:
+        engine = create_engine(
+            settings.DATABASE_URL,
+            echo=settings.DATABASE_ECHO
+        )
+    return engine
+
+def get_session():
+    """获取数据库会话工厂，如果不存在则创建"""
+    global Session
+    if Session is None:
+        Session = sessionmaker(bind=get_engine())
+    return Session
 
 class StrategyStatus(Enum):
     STOPPED = "stopped"
@@ -61,9 +83,8 @@ class BalanceSnapshot(Base):
     snapshot_time = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-# 数据库连接和会话管理
-def init_db(db_url):
-    engine = create_engine(db_url)
+async def init_db():
+    """初始化数据库"""
+    engine = get_engine()
     Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    return Session() 
+    return get_session()() 

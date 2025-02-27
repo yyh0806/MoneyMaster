@@ -8,15 +8,20 @@ from decimal import Decimal
 from loguru import logger
 import sys
 import atexit
+import uvicorn
 
 from src.trading.clients.okx.client import OKXClient
 from src.trading.strategies.deepseek import DeepseekStrategy
-from src.trading.core.models import init_db, TradeRecord, StrategyState, StrategyStatus
+from src.trading.core.models import init_db, TradeRecord, StrategyState, StrategyStatus, get_session
 from src.trading.core.strategy import StoppedState
 from src.trading.core.risk import RiskLimit
 from src.config import settings
 from .websocket import manager, setup_event_handlers
 from .market_data import kline_manager, Candlestick
+from src.trading.clients.okx.models import OKXCandlestick
+
+# 初始化数据库会话
+db_session = None
 
 # 配置日志
 logger.remove()  # 移除默认的日志处理器
@@ -40,154 +45,152 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 创建OKX客户端实例
-okx_client = OKXClient(
-    symbol="BTC-USDT",
-    api_key=settings.API_KEY,
-    api_secret=settings.SECRET_KEY,
-    passphrase=settings.PASSPHRASE,
-    testnet=settings.USE_TESTNET
-)
+# 全局变量
+websocket_connections: Dict[str, WebSocket] = {}
+okx_client: Optional[OKXClient] = None
+strategy: Optional[DeepseekStrategy] = None
+shutdown_event = asyncio.Event()
 
-# 初始化数据库会话
-db_session = init_db("sqlite:///trading.db")
-
-# 初始化事件处理器
-setup_event_handlers()
-
-# 初始化WebSocket连接
 @app.on_event("startup")
 async def startup_event():
-    """服务启动时初始化WebSocket连接和数据缓存"""
-    app_logger.info("正在初始化WebSocket连接和数据缓存...")
+    """服务启动时的初始化"""
+    global okx_client, db_session, strategy
     try:
+        # 初始化数据库会话
+        db_session = await init_db()
+        logger.info("数据库初始化成功")
+        
+        # 初始化OKX客户端
+        okx_client = OKXClient(
+            symbol="BTC-USDT",  # 设置默认交易对
+            api_key=settings.API_KEY,
+            api_secret=settings.SECRET_KEY,
+            passphrase=settings.PASSPHRASE,
+            testnet=settings.USE_TESTNET  # 使用配置中的测试网设置
+        )
         # 连接WebSocket
-        connected = await okx_client.connect()
-        if connected:
-            app_logger.info("WebSocket连接成功")
-            
-            # 初始化缓存数据
-            symbols = ["BTC-USDT", "ETH-USDT", "BNB-USDT", "XRP-USDT", "ADA-USDT"]
-            intervals = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
-            
-            for symbol in symbols:
-                for interval in intervals:
-                    try:
-                        app_logger.info(f"正在获取 {symbol} {interval} 的历史数据...")
-                        # 获取历史数据
-                        history_data = await okx_client.get_candlesticks(
-                            symbol=symbol,
-                            interval=interval,
-                            limit=1000  # 初始加载1000条数据
-                        )
-                        
-                        if history_data:
-                            app_logger.info(f"成功获取 {symbol} {interval} 的历史数据，共 {len(history_data)} 条")
-                            try:
-                                # 转换为缓存数据格式
-                                cache_data = []
-                                for candle in history_data:
-                                    try:
-                                        converted = Candlestick.from_okx_candlestick(candle)
-                                        cache_data.append(converted)
-                                    except Exception as e:
-                                        app_logger.error(f"转换K线数据失败: {symbol} {interval} - {str(e)}")
-                                        continue
-                                
-                                # 初始化缓存
-                                if cache_data:
-                                    await kline_manager.init_klines(symbol, interval, cache_data)
-                                    app_logger.info(f"已缓存 {symbol} {interval} 的历史数据，共 {len(cache_data)} 条")
-                                else:
-                                    app_logger.warning(f"转换后的缓存数据为空: {symbol} {interval}")
-                            except Exception as e:
-                                app_logger.error(f"处理历史数据失败: {symbol} {interval} - {str(e)}")
-                        else:
-                            app_logger.warning(f"未获取到 {symbol} {interval} 的历史数据")
-                            
-                        await asyncio.sleep(1)  # 添加延迟，避免请求过快
-                    except Exception as e:
-                        app_logger.error(f"缓存 {symbol} {interval} 历史数据失败: {str(e)}")
-                        # 继续处理下一个时间周期，不中断整个过程
-                        continue
-                        
-            app_logger.info("数据缓存初始化完成")
-        else:
-            app_logger.error("WebSocket连接失败")
+        await okx_client.connect()
+        logger.info("OKX客户端初始化成功")
+        
+        # 初始化策略
+        strategy = DeepseekStrategy(
+            client=okx_client,
+            symbol="BTC-USDT",
+            db_session=db_session,
+            risk_limit=RiskLimit(
+                total_capital=Decimal('100000'),        # 总资金10万
+                max_capital_usage=Decimal('0.8'),       # 最大使用80%
+                reserve_capital=Decimal('10000'),       # 保留1万作为准备金
+                max_position_value=Decimal('50000'),    # 最大持仓5万
+                max_leverage=3,                         # 最大杠杆3倍
+                min_margin_ratio=Decimal('0.1'),        # 最小保证金率10%
+                max_daily_loss=Decimal('1000'),         # 最大日亏损1000
+                max_order_value=Decimal('10000'),       # 单笔最大1万
+                min_order_value=Decimal('100'),         # 单笔最小100
+                price_deviation=Decimal('0.03')         # 价格偏离度3%
+            ),
+            quantity=Decimal('0.01'),
+            min_interval=30,
+            commission_rate=Decimal('0.001')
+        )
+        logger.info("策略初始化成功")
+        
     except Exception as e:
-        app_logger.error(f"初始化失败: {str(e)}")
-        # 在这里可以选择是否要重试或者采取其他措施
+        logger.error(f"初始化失败: {str(e)}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """服务关闭时清理资源"""
-    app_logger.info("正在关闭服务...")
+    """服务关闭时的清理"""
+    logger.info("正在关闭服务...")
     try:
-        # 关闭WebSocket连接
-        app_logger.info("正在关闭WebSocket连接...")
-        await okx_client.disconnect()
-        app_logger.info("WebSocket连接已关闭")
+        logger.info("正在关闭WebSocket连接...")
+        if okx_client:
+            await okx_client.close()
         
-        # 关闭数据库会话
-        app_logger.info("正在关闭数据库连接...")
-        db_session.close()
-        app_logger.info("数据库连接已关闭")
+        # 关闭所有WebSocket连接
+        for ws in websocket_connections.values():
+            await ws.close()
+        websocket_connections.clear()
         
-        # 关闭所有活跃的WebSocket连接
-        app_logger.info("正在关闭所有WebSocket连接...")
-        for symbol in list(manager.active_connections.keys()):
-            for ws in list(manager.active_connections[symbol]):
+        # 关闭数据库连接
+        await kline_manager.close()
+        
+        logger.info("所有连接已关闭")
+    except Exception as e:
+        logger.error(f"关闭服务时发生错误: {str(e)}")
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    await websocket.accept()
+    websocket_connections[client_id] = websocket
+    logger.info("WebSocket连接成功")
+    
+    try:
+        # 初始化历史数据
+        symbols = ["BTC-USDT", "ETH-USDT", "BNB-USDT", "XRP-USDT"]
+        intervals = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"]
+        
+        for symbol in symbols:
+            for interval in intervals:
                 try:
-                    await ws.close()
+                    logger.info(f"正在获取 {symbol} {interval} 的历史数据...")
+                    klines = await okx_client.get_klines(symbol, interval)
+                    
+                    if klines:
+                        # 转换为Candlestick对象
+                        candlesticks = []
+                        for k in klines:
+                            # OKX返回的数据格式：[timestamp, open, high, low, close, vol, volCcy]
+                            candlesticks.append(OKXCandlestick(
+                                symbol=symbol,
+                                interval=interval,
+                                timestamp=datetime.fromtimestamp(int(k[0]) / 1000),
+                                open=k[1],
+                                high=k[2],
+                                low=k[3],
+                                close=k[4],
+                                volume=k[5]
+                            ))
+                            
+                        # 初始化K线数据
+                        await kline_manager.init_klines(symbol, interval, candlesticks)
+                        logger.info(f"已缓存 {symbol} {interval} 的历史数据，共 {len(candlesticks)} 条")
+                    else:
+                        logger.warning(f"未获取到 {symbol} {interval} 的历史数据")
+                        
                 except Exception as e:
-                    app_logger.error(f"关闭WebSocket连接失败: {e}")
-        app_logger.info("所有WebSocket连接已关闭")
+                    logger.error(f"获取历史数据失败 {symbol} {interval}: {str(e)}")
+                    continue
+                    
+                # 等待一小段时间，避免请求过于频繁
+                await asyncio.sleep(1)
         
+        # 保持连接
+        while True:
+            data = await websocket.receive_text()
+            # 处理接收到的数据...
+            
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket连接断开: {client_id}")
     except Exception as e:
-        app_logger.error(f"关闭服务时发生错误: {e}")
+        logger.error(f"WebSocket错误: {str(e)}")
     finally:
-        # 确保连接器被关闭
-        if hasattr(okx_client, 'connector') and okx_client.connector:
-            await okx_client.connector.close()
-            app_logger.info("HTTP连接器已关闭")
+        websocket_connections.pop(client_id, None)
 
-# 添加同步清理函数
-def cleanup():
-    """同步清理函数"""
-    try:
-        import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(shutdown_event())
-        else:
-            loop.run_until_complete(shutdown_event())
-    except Exception as e:
-        app_logger.error(f"清理资源失败: {e}")
+async def start_server():
+    """启动服务器"""
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="error"
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
-# 注册清理函数
-atexit.register(cleanup)
-
-# 创建策略实例
-strategy = DeepseekStrategy(
-    client=okx_client,
-    symbol="BTC-USDT",
-    db_session=db_session,
-    risk_limit=RiskLimit(
-        total_capital=Decimal('100000'),        # 总资金10万
-        max_capital_usage=Decimal('0.8'),       # 最大使用80%
-        reserve_capital=Decimal('10000'),       # 保留1万作为准备金
-        max_position_value=Decimal('50000'),    # 最大持仓5万
-        max_leverage=3,                         # 最大杠杆3倍
-        min_margin_ratio=Decimal('0.1'),        # 最小保证金率10%
-        max_daily_loss=Decimal('1000'),         # 最大日亏损1000
-        max_order_value=Decimal('10000'),       # 单笔最大1万
-        min_order_value=Decimal('100'),         # 单笔最小100
-        price_deviation=Decimal('0.03')         # 价格偏离度3%
-    ),
-    quantity=Decimal('0.01'),
-    min_interval=30,
-    commission_rate=Decimal('0.001')
-)
+# 导出start_server函数
+__all__ = ['start_server']
 
 # 全局变量
 strategy_tasks = {}
@@ -201,7 +204,6 @@ async def root():
 async def get_balance():
     """获取账户余额"""
     try:
-        app_logger.info("获取账户余额")
         try:
             balances = await okx_client.get_balance()
             app_logger.debug(f"获取到原始余额数据: {balances}")
@@ -240,7 +242,7 @@ async def get_balance():
         error_msg = f"获取账户余额失败: {str(e)}"
         app_logger.error(error_msg)
         return {
-            "code": "1",  # 修改为错误码
+            "code": "0",  # 修改为错误码
             "msg": error_msg,
             "data": {
                 "balances": {}
@@ -251,7 +253,6 @@ async def get_balance():
 async def get_market_price(symbol: str):
     """获取市场价格"""
     try:
-        app_logger.info(f"获取市场价格: {symbol}")
         try:
             data = await okx_client.get_ticker()
         except Exception as e:
@@ -386,7 +387,6 @@ async def get_trades(symbol: str = None, limit: int = 100):
 async def get_strategy_state():
     """获取策略状态"""
     try:
-        app_logger.info("获取策略状态")
         try:
             state = strategy.state_info
         except Exception as e:
@@ -485,7 +485,6 @@ async def get_strategy_state():
 async def get_strategy_analysis():
     """获取策略分析"""
     try:
-        app_logger.info("获取策略分析")
         try:
             analysis = strategy.last_analysis
         except Exception as e:

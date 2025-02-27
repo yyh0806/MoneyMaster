@@ -5,13 +5,13 @@ class OKXConfig:
     
     # REST API
     REST_MAINNET_URL = "https://www.okx.com"  # 主网
-    REST_TESTNET_URL = "https://www.okx.com"  # 测试网
+    REST_TESTNET_URL = "https://www.okx.com"  # 测试网，使用主网域名
     
     # WebSocket
     WS_PUBLIC_MAINNET_URL = "wss://ws.okx.com:8443/ws/v5/public"  # 主网公共频道
     WS_PRIVATE_MAINNET_URL = "wss://ws.okx.com:8443/ws/v5/private"  # 主网私有频道
-    WS_PUBLIC_TESTNET_URL = "wss://ws.okx.com:8443/ws/v5/public"  # 测试网公共频道
-    WS_PRIVATE_TESTNET_URL = "wss://ws.okx.com:8443/ws/v5/private"  # 测试网私有频道
+    WS_PUBLIC_TESTNET_URL = "wss://wspap.okx.com:8443/ws/v5/public"  # 测试网公共频道
+    WS_PRIVATE_TESTNET_URL = "wss://wspap.okx.com:8443/ws/v5/private"  # 测试网私有频道
     
     # API版本
     API_VERSION = "v5"
@@ -69,11 +69,12 @@ class OKXConfig:
     
     # API路径
     API_PATHS = {
-        "PLACE_ORDER": "/api/v5/trade/order",
-        "CANCEL_ORDER": "/api/v5/trade/cancel-order",
-        "GET_ORDER": "/api/v5/trade/order",
-        "GET_PENDING_ORDERS": "/api/v5/trade/orders-pending",
-        "GET_BALANCE": "/api/v5/account/balance"
+        "PLACE_ORDER": "trade/order",
+        "CANCEL_ORDER": "trade/cancel-order",
+        "GET_ORDER": "trade/order",
+        "GET_PENDING_ORDERS": "trade/orders-pending",
+        "GET_BALANCE": "account/balance",
+        "GET_TICKER": "market/ticker"
     }
     
     # WebSocket配置
